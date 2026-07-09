@@ -1,0 +1,12 @@
+.next
+node_modules
+.pnpm-store
+.cache
+.env
+.env.local
+public/generated/*.mp4
+public/generated/*.json
+public/generated/*.pam
+public/generated/*.jpg
+!.gitkeep
+.DS_Store
