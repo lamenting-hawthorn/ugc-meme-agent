@@ -1,0 +1,143 @@
+{
+  "backgrounds": [
+    {
+      "id": "room-clean-01",
+      "filePath": "assets/backgrounds/room-clean-01.jpg",
+      "type": "image",
+      "category": "room",
+      "mood": "clean",
+      "busyTopArea": false,
+      "busyCenterArea": false,
+      "safeTextZone": "top",
+      "tags": ["room", "clean", "startup", "neutral"]
+    },
+    {
+      "id": "office-premium-01",
+      "filePath": "assets/backgrounds/office-premium-01.jpg",
+      "type": "image",
+      "category": "office",
+      "mood": "premium",
+      "busyTopArea": false,
+      "busyCenterArea": false,
+      "safeTextZone": "top",
+      "tags": ["office", "premium", "calm", "work"]
+    }
+  ],
+  "reactions": [
+    {
+      "id": "confused-local-01",
+      "source": "local",
+      "filePathOrUrl": "assets/reactions-fallback/confused-local-01.mp4",
+      "type": "mp4",
+      "mood": "confused",
+      "energy": "medium",
+      "action": "staring",
+      "hasTransparentBackground": false,
+      "width": 360,
+      "height": 360,
+      "durationSec": 4,
+      "loopable": true,
+      "preferredPosition": "bottom-center",
+      "preferredScale": 1,
+      "rating": "g",
+      "tags": ["confused", "thinking", "reaction", "math"]
+    },
+    {
+      "id": "panic-local-01",
+      "source": "local",
+      "filePathOrUrl": "assets/reactions-fallback/panic-local-01.mp4",
+      "type": "mp4",
+      "mood": "panic",
+      "energy": "high",
+      "action": "pointing",
+      "hasTransparentBackground": false,
+      "width": 360,
+      "height": 360,
+      "durationSec": 4,
+      "loopable": true,
+      "preferredPosition": "bottom-center",
+      "preferredScale": 1,
+      "rating": "g",
+      "tags": ["panic", "chaotic", "reaction", "stress"]
+    },
+    {
+      "id": "relief-local-01",
+      "source": "local",
+      "filePathOrUrl": "assets/reactions-fallback/relief-local-01.mp4",
+      "type": "mp4",
+      "mood": "relief",
+      "energy": "low",
+      "action": "celebrating",
+      "hasTransparentBackground": false,
+      "width": 360,
+      "height": 360,
+      "durationSec": 4,
+      "loopable": true,
+      "preferredPosition": "bottom-center",
+      "preferredScale": 1,
+      "rating": "g",
+      "tags": ["relief", "calm", "reaction", "done"]
+    },
+    {
+      "id": "shocked-local-01",
+      "source": "local",
+      "filePathOrUrl": "assets/reactions-fallback/shocked-local-01.mp4",
+      "type": "mp4",
+      "mood": "shocked",
+      "energy": "high",
+      "action": "staring",
+      "hasTransparentBackground": false,
+      "width": 360,
+      "height": 360,
+      "durationSec": 4,
+      "loopable": true,
+      "preferredPosition": "bottom-center",
+      "preferredScale": 1,
+      "rating": "g",
+      "tags": ["shocked", "dramatic", "reaction"]
+    }
+  ],
+  "audio": [
+    {
+      "id": "funny-bounce-01",
+      "filePath": "assets/audio/funny-bounce-01.mp3",
+      "mood": "funny",
+      "energy": "medium",
+      "durationSec": 8,
+      "hasBeatDrop": false,
+      "license": "demo-local",
+      "tags": ["funny", "bounce", "meme"]
+    },
+    {
+      "id": "dramatic-hit-01",
+      "filePath": "assets/audio/dramatic-hit-01.mp3",
+      "mood": "dramatic",
+      "energy": "high",
+      "durationSec": 8,
+      "hasBeatDrop": true,
+      "beatDropAtSec": 1.2,
+      "license": "demo-local",
+      "tags": ["dramatic", "hit", "reveal"]
+    },
+    {
+      "id": "chill-loop-01",
+      "filePath": "assets/audio/chill-loop-01.mp3",
+      "mood": "chill",
+      "energy": "low",
+      "durationSec": 8,
+      "hasBeatDrop": false,
+      "license": "demo-local",
+      "tags": ["chill", "clean", "soft"]
+    },
+    {
+      "id": "chaotic-beep-01",
+      "filePath": "assets/audio/chaotic-beep-01.mp3",
+      "mood": "chaotic",
+      "energy": "high",
+      "durationSec": 8,
+      "hasBeatDrop": false,
+      "license": "demo-local",
+      "tags": ["chaotic", "panic", "meme"]
+    }
+  ]
+}
