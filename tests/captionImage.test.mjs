@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import sharp from "sharp";
 import { writeCaptionImage } from "../lib/render/captionImage.ts";
 
 test("caption rasterization is font-independent and produces visible glyph pixels", async () => {
@@ -12,11 +13,9 @@ test("caption rasterization is font-independent and produces visible glyph pixel
   try {
     await writeCaptionImage(outputPath, "ME when result.dev handles it 🚀");
     const output = await readFile(outputPath);
-    const headerEnd = output.indexOf(Buffer.from("ENDHDR\n")) + "ENDHDR\n".length;
-    const pixels = output.subarray(headerEnd);
-
-    assert.match(output.subarray(0, headerEnd).toString("ascii"), /P7\nWIDTH 512\nHEIGHT 250\nDEPTH 4/);
-    assert.equal(pixels.length, 512 * 250 * 4);
+    assert.deepEqual([...output.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+    const { data: pixels, info } = await sharp(outputPath).raw().toBuffer({ resolveWithObject: true });
+    assert.deepEqual({ width: info.width, height: info.height, channels: info.channels }, { width: 512, height: 250, channels: 4 });
 
     let visiblePixels = 0;
     let whitePixels = 0;

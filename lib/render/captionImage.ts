@@ -1,8 +1,7 @@
 import { writeFile } from "fs/promises";
+import sharp from "sharp";
 
 // Keep caption rendering independent of the deployment host's installed fonts.
-// The output is PAM data despite the historical .png filename; FFmpeg detects
-// it from the P7 magic header and handles it as an RGBA image.
 const WIDTH = 512;
 const HEIGHT = 250;
 const GLYPH_WIDTH = 5;
@@ -78,8 +77,10 @@ export async function writeCaptionImage(filePath: string, text: string): Promise
     }
   });
 
-  const header = Buffer.from(`P7\nWIDTH ${WIDTH}\nHEIGHT ${HEIGHT}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n`);
-  await writeFile(filePath, Buffer.concat([header, pixels]));
+  const png = await sharp(pixels, {
+    raw: { width: WIDTH, height: HEIGHT, channels: 4 }
+  }).png().toBuffer();
+  await writeFile(filePath, png);
 }
 
 function fitLines(text: string): string[] {
