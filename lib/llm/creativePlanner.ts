@@ -12,8 +12,8 @@ export async function planCreative(
   skill?: AppliedVideoSkill | null
 ): Promise<CreativePlan> {
   const llmResult = await planWithDeepSeek(product, vibeOverride, conversationMemory, skill);
-  if (llmResult) return llmResult;
-  return planDeterministically(product, vibeOverride, conversationMemory, skill);
+  const plan = llmResult ?? planDeterministically(product, vibeOverride, conversationMemory, skill);
+  return ensureProductMention(plan, product);
 }
 
 async function planWithDeepSeek(
@@ -36,6 +36,7 @@ async function planWithDeepSeek(
               "Make the product the punchline, not the hero.",
               "Keep captions 45-110 characters when possible, never more than 2 ideas, and avoid hashtags, emojis, claims, or corporate words like revolutionize, seamless, unlock, future, powerful.",
               "Do not name a specific meme or celebrity.",
+              "The caption must be a complete standalone meme line, must explicitly mention the product/site, and must not end with a dangling word such as and, but, still, because, or until.",
               "Use these exact enum values: reactionMood = confused | panic | shocked | relief | smug | crying | celebrating; audioMood = funny | dramatic | chill | chaotic | victory; memeFormat = me-when | pov | before-after | pretending-to-know | manual-vs-automated | realization; humorStyle = relatable | absurd | dry | genz | dramatic; backgroundCategory = room | office | sky | phone | gradient | lifestyle; backgroundMood = clean | premium | neutral | dramatic | funny.",
               skill
                 ? `Installed skill to follow as source of truth:\nSkill ID: ${skill.id}\n${skill.instructions}`
@@ -47,6 +48,7 @@ async function planWithDeepSeek(
           content: [
             vibeOverride ? `Vibe override: ${vibeOverride}` : "",
             `Product understanding: ${JSON.stringify(product)}`,
+            `Caption identity requirement: explicitly include the exact site host ${productHost(product)} or the product name ${product.productName}.`,
             formatConversationMemory(conversationMemory),
             `Caption variant index: ${(conversationMemory ?? []).filter((entry) => entry.type === "generation_request" || entry.type === "result_summary").length % 4}`,
             skill ? `Applied skill ID: ${skill.id}` : "",
@@ -123,6 +125,34 @@ function parseCreativePlan(content: string): CreativePlan {
 function normalizeEnum(value: unknown, aliases: Record<string, string>): unknown {
   if (typeof value !== "string") return value;
   return aliases[value.toLowerCase()] ?? value;
+}
+
+function ensureProductMention(plan: CreativePlan, product: ProductUnderstanding): CreativePlan {
+  const host = productHost(product);
+  const caption = plan.caption.trim();
+  const lowerCaption = caption.toLowerCase();
+  if (lowerCaption.includes(host)) {
+    return plan;
+  }
+
+  const withoutTrailingPunctuation = caption.replace(/[.!?]+$/, "");
+  const completeCaption = /\b(and|or|but|still|because|until|so|to)$/i.test(withoutTrailingPunctuation)
+    ? `${withoutTrailingPunctuation.replace(/\s+(and|or|but|still|because|until|so|to)$/i, "")} and still not knowing how to use ${host}`
+    : `${withoutTrailingPunctuation} / still figuring out ${host}`;
+  const repairedCaption = completeCaption.length <= 145
+    ? completeCaption
+    : `me after trying everything and still not knowing how to use ${host}`;
+
+  logger.info("Repaired creative caption to include product identity", {
+    host,
+    originalLength: caption.length,
+    repairedLength: repairedCaption.length
+  });
+  return { ...plan, caption: repairedCaption };
+}
+
+function productHost(product: ProductUnderstanding): string {
+  return new URL(product.productUrl).hostname.replace(/^www\./, "").toLowerCase();
 }
 
 function planDeterministically(
