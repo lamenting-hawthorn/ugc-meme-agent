@@ -231,6 +231,8 @@ h1 {
 }
 
 .captionBlock { display: grid; gap: 2px; }
+.assetCredit { margin-top: 8px; font-size: 1rem; color: var(--muted); }
+.assetCredit a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 
 .generationDetails {
   max-width: 520px;

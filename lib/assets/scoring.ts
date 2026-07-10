@@ -24,8 +24,9 @@ export function scoreAudio(plan: CreativePlan, asset: AudioAsset): number {
   const mood = plan.audioMood === asset.mood ? 1 : 0.35;
   const energy = scoreEnergy(energyForAudio(plan.audioMood), asset.energy);
   const semantic = scoreOverlap([plan.caption, plan.reactionMood], asset.tags);
-  const sourceBoost = asset.source === "local" ? 0.9 : 0.72;
-  return mood * 0.45 + energy * 0.25 + semantic * 0.2 + sourceBoost * 0.1;
+  const quality = asset.providerQuality ?? (asset.source === "local" ? 0.2 : 0.5);
+  const sourceReliability = asset.source === "local" ? 0.9 : 0.75;
+  return mood * 0.35 + energy * 0.2 + semantic * 0.15 + quality * 0.25 + sourceReliability * 0.05;
 }
 
 export function scoreBackground(plan: CreativePlan, asset: BackgroundAsset): number {

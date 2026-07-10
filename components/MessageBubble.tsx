@@ -39,6 +39,19 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
             </ul>
           </details>
         ) : null}
+        {message.result?.selectedAssets?.audio.source === "freesound" ? (
+          <p className="assetCredit">
+            Audio: {message.result.selectedAssets.audio.sourceUrl ? (
+              <a href={message.result.selectedAssets.audio.sourceUrl} target="_blank" rel="noreferrer">
+                {message.result.selectedAssets.audio.title ?? message.result.selectedAssets.audio.id}
+              </a>
+            ) : message.result.selectedAssets.audio.title ?? message.result.selectedAssets.audio.id}
+            {message.result.selectedAssets.audio.creator ? ` by ${message.result.selectedAssets.audio.creator}` : ""}
+            {message.result.selectedAssets.audio.licenseUrl ? (
+              <> · <a href={message.result.selectedAssets.audio.licenseUrl} target="_blank" rel="noreferrer">license</a></>
+            ) : null}
+          </p>
+        ) : null}
       </div>
     </article>
   );

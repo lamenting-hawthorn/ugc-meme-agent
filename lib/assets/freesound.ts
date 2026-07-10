@@ -6,9 +6,15 @@ type FreesoundResponse = {
   results?: Array<{
     id: number;
     name?: string;
+    username?: string;
     duration?: number;
     tags?: string[];
     license?: string;
+    url?: string;
+    score?: number;
+    avg_rating?: number;
+    num_ratings?: number;
+    num_downloads?: number;
     previews?: {
       "preview-hq-mp3"?: string;
       "preview-lq-mp3"?: string;
@@ -24,23 +30,25 @@ export async function fetchFreesoundCandidates(plan: CreativePlan): Promise<Audi
   if (!apiKey) return [];
 
   const queries = audioQueries(plan);
-  const cacheKey = queries.join("|");
+  const cacheKey = `quality-v3|${queries.join("|")}`;
   const cached = await readProviderCache<AudioAsset[]>("freesound", cacheKey);
   if (cached) return cached;
 
   try {
     const assetsById = new Map<string, AudioAsset>();
 
-    for (const query of queries) {
+    const results = await Promise.allSettled(queries.map(async (query) => {
       const params = new URLSearchParams({
         query,
-        fields: "id,name,duration,tags,license,previews",
+        fields: "id,name,username,duration,tags,license,url,previews,score,avg_rating,num_ratings,num_downloads",
         page_size: String(RESULT_LIMIT),
-        filter: `duration:[5 TO 12] ${(filterByMood(plan.audioMood))}`.trim()
+        filter: `duration:[5 TO 12] ${(filterByMood(plan.audioMood))}`.trim(),
+        sort: "downloads_desc",
+        group_by_pack: "1"
       });
-      const response = await fetch(`https://freesound.org/apiv2/search/text/?${params.toString()}`, {
+      const response = await fetch(`https://freesound.org/apiv2/search/?${params.toString()}`, {
         headers: { Authorization: `Token ${apiKey}` },
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(4500)
       });
       if (!response.ok) {
         throw new Error(`Freesound search failed with ${response.status}`);
@@ -52,6 +60,11 @@ export async function fetchFreesoundCandidates(plan: CreativePlan): Promise<Audi
       for (const asset of assets) {
         assetsById.set(asset.id, asset);
       }
+    }));
+
+    if (results.every((result) => result.status === "rejected")) {
+      const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      throw failure?.reason ?? new Error("All Freesound searches failed");
     }
 
     const assets = [...assetsById.values()];
@@ -72,6 +85,7 @@ function toAudioAsset(
 ): AudioAsset | null {
   const preview = item.previews?.["preview-hq-mp3"] ?? item.previews?.["preview-lq-mp3"];
   if (!preview || !item.duration) return null;
+  if (/by-nc|sampling\+/i.test(item.license ?? "")) return null;
   return {
     id: `freesound-${item.id}`,
     filePath: preview,
@@ -82,6 +96,11 @@ function toAudioAsset(
     hasBeatDrop: /drop|impact|hit|bass/i.test(`${item.name ?? ""} ${(item.tags ?? []).join(" ")}`),
     beatDropAtSec: undefined,
     license: "freesound",
+    providerQuality: providerQuality(item),
+    title: item.name,
+    creator: item.username,
+    licenseUrl: safeHttpUrl(item.license),
+    sourceUrl: safeHttpUrl(item.url),
     tags: tokenize(`${item.name ?? ""} ${(item.tags ?? []).join(" ")} ${item.license ?? ""}`)
   };
 }
@@ -94,7 +113,25 @@ function audioQueries(plan: CreativePlan): string[] {
     chaotic: ["glitch tension loop", "chaotic electronic loop", "panic synth loop", "intense stinger"],
     victory: ["celebration loop", "uplifting victory music", "triumphant background music", "success sting"]
   };
-  return termsByMood[plan.audioMood];
+  return termsByMood[plan.audioMood].slice(0, 2);
+}
+
+function providerQuality(item: NonNullable<FreesoundResponse["results"]>[number]): number {
+  const rating = Math.min(1, Math.max(0, (item.avg_rating ?? 0) / 5));
+  const ratingConfidence = Math.min(1, Math.log10((item.num_ratings ?? 0) + 1) / 2);
+  const popularity = Math.min(1, Math.log10((item.num_downloads ?? 0) + 1) / 5);
+  const relevance = Math.min(1, Math.max(0, item.score ?? 0));
+  return rating * ratingConfidence * 0.35 + popularity * 0.4 + relevance * 0.25;
+}
+
+function safeHttpUrl(value?: string): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function filterByMood(mood: CreativePlan["audioMood"]): string {

@@ -35,7 +35,8 @@ export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promis
     `[0:v]scale=${renderPlan.output.width}:${renderPlan.output.height}:force_original_aspect_ratio=increase,crop=${renderPlan.output.width}:${renderPlan.output.height},setsar=1[bg]`,
     "[1:v]scale=360:-2,format=rgba[rx]",
     "[bg][rx]overlay=(W-w)/2:H-h-54:shortest=0[comp]",
-    "[comp][2:v]overlay=0:70:shortest=0[v]"
+    "[comp][2:v]overlay=0:70:shortest=0[v]",
+    `[3:a]loudnorm=I=-16:TP=-1.5:LRA=7,afade=t=in:st=0:d=0.08,afade=t=out:st=${Math.max(0, renderPlan.output.durationSec - 0.3)}:d=0.3[a]`
   ].join(";");
 
   try {
@@ -63,7 +64,7 @@ export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promis
       "-map",
       "[v]",
       "-map",
-      "3:a",
+      "[a]",
       "-r",
       String(renderPlan.output.fps),
       "-c:v",

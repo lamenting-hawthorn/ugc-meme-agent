@@ -106,6 +106,7 @@
       "durationSec": 8,
       "hasBeatDrop": false,
       "license": "demo-local",
+      "providerQuality": 0.05,
       "tags": ["funny", "bounce", "meme"]
     },
     {
@@ -117,6 +118,7 @@
       "hasBeatDrop": true,
       "beatDropAtSec": 1.2,
       "license": "demo-local",
+      "providerQuality": 0.05,
       "tags": ["dramatic", "hit", "reveal"]
     },
     {
@@ -127,6 +129,7 @@
       "durationSec": 8,
       "hasBeatDrop": false,
       "license": "demo-local",
+      "providerQuality": 0.05,
       "tags": ["chill", "clean", "soft"]
     },
     {
@@ -137,6 +140,7 @@
       "durationSec": 8,
       "hasBeatDrop": false,
       "license": "demo-local",
+      "providerQuality": 0.05,
       "tags": ["chaotic", "panic", "meme"]
     },
     {
@@ -148,6 +152,7 @@
       "hasBeatDrop": true,
       "beatDropAtSec": 1.5,
       "license": "demo-local",
+      "providerQuality": 0.05,
       "tags": ["victory", "celebration", "triumph", "win"]
     }
   ]

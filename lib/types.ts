@@ -76,6 +76,11 @@ export type AudioAsset = {
   hasBeatDrop: boolean;
   beatDropAtSec?: number;
   license: "demo-local" | "royalty-free" | "licensed" | "freesound";
+  providerQuality?: number;
+  title?: string;
+  creator?: string;
+  licenseUrl?: string;
+  sourceUrl?: string;
   tags: string[];
 };
 
