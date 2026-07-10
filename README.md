@@ -1,5 +1,9 @@
 # UGC Meme Agent
 
+> Turn a product URL and a user pain point into a short, vertical reaction video.
+
+UGC Meme Agent is a production-minded Next.js prototype for generating 7–15 second UGC-style meme videos. It combines structured creative planning, product-page context, ranked media selection, deterministic FFmpeg rendering, and graceful fallbacks so a demo remains useful when optional providers are unavailable.
+
 A chat-based UGC meme video generator for startups. It reads a product URL, understands the user pain point, writes a short meme caption, matches reaction/audio/background assets, renders a vertical MP4, and returns it in chat.
 
 The system separates creative reasoning from deterministic rendering. The LLM produces structured product and creative plans when an OpenRouter or DeepSeek key is present; by default it now prefers the OpenRouter Qwen VL model for both structured text generation and vision reranking. The deterministic fallback keeps the demo working without external APIs. The asset intelligence layer scores compatible reactions, audio, and backgrounds before FFmpeg composes the final clip.
@@ -16,13 +20,21 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+## Why this is interesting
+
+- Product-aware captions instead of generic copy.
+- Structured plans validated before they reach the renderer.
+- Local assets and deterministic fallbacks for reliable demos.
+- SSRF-aware product URL validation, bounded redirects, timeouts, and render budgets.
+- Optional OpenRouter vision reranking for reaction quality.
+
 Example prompt:
 
 ```text
 I'm building CalAI, a calorie-tracking app. Here's the site: calai.app
 ```
 
-## Environment
+## Configuration
 
 Copy `.env.example` to `.env.local`.
 
@@ -42,7 +54,7 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 STORAGE_MODE=local
 ```
 
-Add all API keys in `.env.local` at the repo root. This app reads them server-side only.
+Copy `.env.example` to `.env.local` and add only the providers you need. API keys are read server-side; do not expose them through `NEXT_PUBLIC_*` variables or commit `.env.local`.
 
 ## Architecture
 
@@ -53,6 +65,14 @@ Add all API keys in `.env.local` at the repo root. This app reads them server-si
 - `lib/assets` loads the local manifest, searches GIPHY `gifs` and `stickers`, and optionally uses an OpenRouter-hosted Qwen VL model to classify the top remote reactions. Selection follows a strict visual hierarchy: real-human stickers first, animated figures second, and generic/random stickers only as fallback. It also pulls remote Pexels backgrounds and Freesound previews when configured, caches provider responses on disk, and scores assets.
 - `lib/render` builds a deterministic render plan, creates a caption overlay (SVG → PNG via sharp), renders with FFmpeg, and validates the MP4 with `ffprobe`.
 - `public/generated` stores local demo output.
+
+### Request flow
+
+1. The chat route identifies generation, regeneration, and conversational requests.
+2. Product URLs are validated as public HTTP(S) destinations before fetches and redirects.
+3. The planner produces a bounded, structured creative plan with product identity checks.
+4. Asset providers are queried concurrently, ranked, and reduced to a render-safe selection.
+5. FFmpeg renders a vertical clip; output validation checks duration, audio, and dimensions.
 
 ## Chat Features
 
@@ -73,6 +93,8 @@ The app is designed to keep working when external services fail:
 - If Freesound is missing or unavailable, local audio is used.
 - Rendered outputs are checked for duration, audio, and vertical aspect ratio.
 
+These are resilience guarantees for the demo path, not a claim that every third-party provider or arbitrary remote asset will succeed.
+
 For demo purposes, GIPHY can be used as a dynamic reaction asset source. For production/commercial rendering, this should use licensed asset packs, approved GIPHY terms, or creator-licensed UGC media.
 
 ## GIPHY Integration Note
@@ -91,3 +113,25 @@ npm run build
 npm audit --omit=dev --audit-level=moderate
 ffprobe -v error -show_entries format=duration:stream=codec_type,width,height -of json public/generated/<job>.mp4
 ```
+
+## Deployment
+
+The app is compatible with a Node-capable deployment such as Vercel. For serverless deployment, set `STORAGE_MODE=blob` and provide `BLOB_READ_WRITE_TOKEN`; local filesystem output is intended for development only. Configure provider keys and `NEXT_PUBLIC_APP_URL` in the deployment environment, then run:
+
+```bash
+npm ci
+npm test
+npm run lint
+npm run build
+```
+
+## Scope and limitations
+
+- This is a generation workflow, not a content-moderation or brand-safety system.
+- Remote media usage must comply with provider and creator licensing terms. Use licensed asset packs for commercial production.
+- Product-page extraction is best-effort and does not bypass authentication or client-rendered application state.
+- The current tests cover policy, URL safety, and generation-budget behavior; browser and provider-contract coverage remain follow-ups.
+
+## License
+
+No open-source license has been declared yet. Treat this repository as “all rights reserved” until a license is added.
