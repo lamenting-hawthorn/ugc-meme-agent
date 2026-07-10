@@ -127,7 +127,7 @@ export async function rerankReactionCandidatesWithVision(
 
     const raw = payload.choices?.[0]?.message?.content;
     if (!raw) {
-      logger.warn("OpenRouter vision rerank returned empty content; keeping heuristic order");
+      logger.info("OpenRouter vision rerank returned empty content; keeping heuristic order");
       return null;
     }
 

@@ -16,6 +16,7 @@ function enumAlias(value: string): string | null {
   if (/kitchen|bedroom|home|desk/.test(value)) return "room";
   if (/messy|plain|simple/.test(value)) return "neutral";
   if (/entertained|amused/.test(value)) return "happy";
+  if (/effortless|at ease|easy|unburdened/.test(value)) return "relieved";
   if (/empowered/.test(value)) return "confident";
   if (/self-deprecating|self deprecating/.test(value)) return "relatable";
   if (/excited|win|winning/.test(value)) return "celebrating";

@@ -35,7 +35,8 @@ async function planWithDeepSeek(
               "Use one of these proven formats: 'me when [relatable situation] and [product payoff]', 'pov: [painful old workflow] until [product payoff]', or '[manual behavior] / [using product]'.",
               "Make the product the punchline, not the hero.",
               "Keep captions 45-110 characters when possible, never more than 2 ideas, and avoid hashtags, emojis, claims, or corporate words like revolutionize, seamless, unlock, future, powerful.",
-              "Do not name a specific meme or celebrity. Enum fields must use only the allowed values.",
+              "Do not name a specific meme or celebrity.",
+              "Use these exact enum values: reactionMood = confused | panic | shocked | relief | smug | crying | celebrating; audioMood = funny | dramatic | chill | chaotic | victory; memeFormat = me-when | pov | before-after | pretending-to-know | manual-vs-automated | realization; humorStyle = relatable | absurd | dry | genz | dramatic; backgroundCategory = room | office | sky | phone | gradient | lifestyle; backgroundMood = clean | premium | neutral | dramatic | funny.",
               skill
                 ? `Installed skill to follow as source of truth:\nSkill ID: ${skill.id}\n${skill.instructions}`
                 : ""
@@ -82,13 +83,46 @@ async function planWithDeepSeek(
       });
       return null;
     }
-    return { ...creativePlanSchema.parse(JSON.parse(result.content)), source: result.provider };
+    return { ...parseCreativePlan(result.content), source: result.provider };
   } catch (error) {
     logger.warn("Structured creative planning returned invalid JSON; using deterministic fallback", {
       error: error instanceof Error ? error.message : "unknown"
     });
     return null;
   }
+}
+
+function parseCreativePlan(content: string): CreativePlan {
+  const raw = JSON.parse(content) as Record<string, unknown>;
+  const direct = creativePlanSchema.safeParse(raw);
+  if (direct.success) return direct.data;
+
+  const repaired = {
+    ...raw,
+    reactionMood: normalizeEnum(raw.reactionMood, {
+      frustrated: "panic",
+      overwhelmed: "panic",
+      stressed: "panic",
+      annoyed: "confused"
+    }),
+    audioMood: normalizeEnum(raw.audioMood, {
+      quirky: "funny",
+      energetic: "chaotic",
+      calm: "chill",
+      triumphant: "victory"
+    })
+  };
+  const result = creativePlanSchema.parse(repaired);
+  logger.info("Normalized structured creative enum aliases", {
+    reactionMood: String(raw.reactionMood),
+    audioMood: String(raw.audioMood)
+  });
+  return result;
+}
+
+function normalizeEnum(value: unknown, aliases: Record<string, string>): unknown {
+  if (typeof value !== "string") return value;
+  return aliases[value.toLowerCase()] ?? value;
 }
 
 function planDeterministically(

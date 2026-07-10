@@ -1,37 +1,32 @@
-import { execFile } from "child_process";
-import { access, mkdir, writeFile } from "fs/promises";
-import os from "os";
-import path from "path";
-import { promisify } from "util";
+import { execFile } from "node:child_process";
+import { access, mkdir } from "node:fs/promises";
+import path from "node:path";
+import { promisify } from "node:util";
 import type { RenderPlan } from "@/lib/types";
+import { getFfmpegPath } from "@/lib/render/ffmpegBinary";
 import { writeCaptionImage } from "@/lib/render/captionImage";
+import { prepareReactionInput } from "@/lib/render/normalizeReaction";
+import { prepareRemoteInput, type PreparedInput } from "@/lib/render/prepareRemoteInput";
 import { validateOutput } from "@/lib/render/validateOutput";
 import { persistArtifact, workingDir } from "@/lib/storage/storage";
-import { getFfmpegPath } from "@/lib/render/ffmpegBinary";
-import { logger } from "@/lib/utils/logger";
 
 const execFileAsync = promisify(execFile);
-const FFMPEG_TIMEOUT_MS = 25_000;
-const REMOTE_FETCH_TIMEOUT_MS = 15_000;
+const FFMPEG_TIMEOUT_MS = 45_000;
 
-export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promise<{ filePath: string; videoUrl: string; posterUrl: string }> {
+type RenderResult = {
+  filePath: string;
+  videoUrl: string;
+  posterUrl: string;
+};
+
+export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promise<RenderResult> {
   const outputDir = workingDir(jobId);
   await mkdir(outputDir, { recursive: true });
-  const tmpDir = path.join(os.tmpdir(), "render-tmp", jobId);
-  await mkdir(tmpDir, { recursive: true });
 
   const captionImage = path.join(outputDir, `${jobId}.caption.png`);
   await writeCaptionImage(captionImage, renderPlan.caption.text);
-
-  // Pre-fetch remote inputs to local tmp files. FFmpeg's built-in HTTP/TLS
-  // support is flaky under concurrent remote reads (TLS "Unknown error",
-  // silent zero-byte output, 25 s timeout) — materializing the inputs on
-  // disk first makes the render deterministic and debuggable.
-  const backgroundPath = await materialize(renderPlan.background.filePath, jobId, tmpDir, "bg");
-  const reactionPath = await materialize(renderPlan.reaction.filePathOrUrl, jobId, tmpDir, "rx");
-  const audioPath = await materialize(renderPlan.audio.filePath, jobId, tmpDir, "au");
-
   const outputPath = path.join(outputDir, `${jobId}.mp4`);
+  const preparedInputs = await prepareRenderInputs(jobId, outputDir, renderPlan);
 
   const filter = [
     `[0:v]scale=${renderPlan.output.width}:${renderPlan.output.height}:force_original_aspect_ratio=increase,crop=${renderPlan.output.width}:${renderPlan.output.height},setsar=1[bg]`,
@@ -40,66 +35,58 @@ export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promis
     "[comp][2:v]overlay=0:70:shortest=0[v]"
   ].join(";");
 
-  await runFfmpeg([
-    "-y",
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-nostats",
-    "-xerror",
-    ...backgroundInputArgs(renderPlan.background.type, backgroundPath),
-    "-stream_loop",
-    "-1",
-    "-i",
-    reactionPath,
-    "-i",
-    captionImage,
-    "-stream_loop",
-    "-1",
-    "-i",
-    audioPath,
-    "-t",
-    String(renderPlan.output.durationSec),
-    "-filter_complex",
-    filter,
-    "-map",
-    "[v]",
-    "-map",
-    "3:a",
-    "-r",
-    String(renderPlan.output.fps),
-    "-c:v",
-    "libx264",
-    "-profile:v",
-    "baseline",
-    "-level",
-    "3.1",
-    "-pix_fmt",
-    "yuv420p",
-    "-color_range",
-    "tv",
-    "-movflags",
-    "+faststart",
-    "-c:a",
-    "aac",
-    "-shortest",
-    outputPath
-  ], FFMPEG_TIMEOUT_MS, "render video");
-
   try {
-    await access(outputPath);
-  } catch {
-    throw new Error(
-      [
-        "FFmpeg finished without creating the output MP4.",
-        `background=${describeAsset(renderPlan.background.id, backgroundPath)}`,
-        `reaction=${describeAsset(renderPlan.reaction.id, reactionPath)}`,
-        `audio=${describeAsset(renderPlan.audio.id, audioPath)}`
-      ].join(" ")
-    );
+    await runFfmpeg([
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-nostats",
+      ...backgroundInputArgs(renderPlan.background.type, preparedInputs.background.path),
+      "-stream_loop",
+      "-1",
+      "-i",
+      preparedInputs.reaction.path,
+      "-i",
+      captionImage,
+      "-stream_loop",
+      "-1",
+      "-i",
+      preparedInputs.audio.path,
+      "-t",
+      String(renderPlan.output.durationSec),
+      "-filter_complex",
+      filter,
+      "-map",
+      "[v]",
+      "-map",
+      "3:a",
+      "-r",
+      String(renderPlan.output.fps),
+      "-c:v",
+      "libx264",
+      "-profile:v",
+      "baseline",
+      "-level",
+      "3.1",
+      "-pix_fmt",
+      "yuv420p",
+      "-color_range",
+      "tv",
+      "-movflags",
+      "+faststart",
+      "-c:a",
+      "aac",
+      "-shortest",
+      outputPath
+    ], FFMPEG_TIMEOUT_MS, "render video");
+  } finally {
+    await preparedInputs.cleanup();
   }
 
+  await access(outputPath);
   await validateOutput(outputPath, renderPlan.output.durationSec);
+
   const posterPath = path.join(outputDir, `${jobId}.jpg`);
   await runFfmpeg([
     "-y",
@@ -118,10 +105,8 @@ export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promis
     "-q:v",
     "3",
     posterPath
-  ], 10_000, "extract poster");
+  ], 15_000, "extract poster");
 
-  // Publish: local mode returns /generated/<id> URLs (files already on disk);
-  // blob mode uploads to Vercel Blob and returns CDN URLs.
   const video = await persistArtifact(outputPath, `${jobId}.mp4`, "video/mp4");
   const poster = await persistArtifact(posterPath, `${jobId}.jpg`, "image/jpeg");
 
@@ -132,65 +117,80 @@ export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promis
   };
 }
 
-async function materialize(filePathOrUrl: string, jobId: string, tmpDir: string, prefix: string): Promise<string> {
-  // Local assets — resolve and pass through.
-  if (!/^https?:\/\//.test(filePathOrUrl)) {
-    if (filePathOrUrl.startsWith("assets/")) {
-      return path.join(process.cwd(), "assets", filePathOrUrl.slice("assets/".length));
-    }
-    if (filePathOrUrl.startsWith("public/")) {
-      return path.join(process.cwd(), "public", filePathOrUrl.slice("public/".length));
-    }
-    throw new Error(`Unsupported local asset path: ${filePathOrUrl}`);
+async function prepareRenderInputs(
+  jobId: string,
+  outputDir: string,
+  renderPlan: RenderPlan
+): Promise<{ background: PreparedInput; reaction: PreparedInput; audio: PreparedInput; cleanup: () => Promise<void> }> {
+  const backgroundPath = resolveAssetPath(renderPlan.background.filePath);
+  const reactionPath = resolveAssetPath(renderPlan.reaction.filePathOrUrl);
+  const audioPath = resolveAssetPath(renderPlan.audio.filePath);
+  const results = await Promise.allSettled([
+    prepareRemoteInput(
+      backgroundPath,
+      jobId,
+      outputDir,
+      renderPlan.background.type === "video" ? "background-video" : "background-image"
+    ),
+    prepareReactionInput({
+      filePathOrUrl: reactionPath,
+      previewImageUrl: renderPlan.reaction.previewImageUrl
+    }, jobId, outputDir),
+    prepareRemoteInput(audioPath, jobId, outputDir, "audio")
+  ]);
+  const prepared = results
+    .filter((result): result is PromiseFulfilledResult<PreparedInput> => result.status === "fulfilled")
+    .map((result) => result.value);
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure) {
+    await Promise.allSettled(prepared.map((input) => input.cleanup()));
+    throw failure.reason;
   }
 
-  // Remote asset — download to a stable tmp path so ffmpeg reads from disk.
-  const url = new URL(filePathOrUrl);
-  const ext = path.extname(url.pathname) || inferExtFromUrl(filePathOrUrl) || ".bin";
-  const tmpPath = path.join(tmpDir, `${prefix}${ext}`);
-  try {
-    const response = await fetch(filePathOrUrl, { signal: AbortSignal.timeout(REMOTE_FETCH_TIMEOUT_MS) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const buf = Buffer.from(await response.arrayBuffer());
-    if (buf.byteLength < 1000) throw new Error(`downloaded only ${buf.byteLength} bytes`);
-    await writeFile(tmpPath, buf);
-    logger.info("Downloaded remote asset for render", { url: filePathOrUrl.slice(0, 80), bytes: buf.byteLength, to: tmpPath });
-    return tmpPath;
-  } catch (error) {
-    throw new Error(`Failed to download render asset ${filePathOrUrl.slice(0, 120)}: ${error instanceof Error ? error.message : "unknown"}`);
-  }
-}
-
-function inferExtFromUrl(url: string): string | null {
-  const m = url.match(/\.(mp4|gif|webp|webm|mp3|wav|ogg|jpg|jpeg|png)(\?|$)/i);
-  return m ? `.${m[1].toLowerCase()}` : null;
+  const [background, reaction, audio] = prepared;
+  return {
+    background,
+    reaction,
+    audio,
+    cleanup: async () => {
+      await Promise.allSettled(prepared.map((input) => input.cleanup()));
+    }
+  };
 }
 
 async function runFfmpeg(args: string[], timeout: number, action: string): Promise<void> {
   try {
-    await execFileAsync(getFfmpegPath(), args, { maxBuffer: 1024 * 1024 * 16, timeout });
+    await execFileAsync(getFfmpegPath(), args, {
+      maxBuffer: 64 * 1024 * 1024,
+      timeout,
+      killSignal: "SIGKILL"
+    });
   } catch (error) {
-    const detail = error && typeof error === "object" && "stderr" in error && typeof error.stderr === "string"
-      ? error.stderr.trim().slice(0, 1200)
+    const stderr = isExecError(error) ? error.stderr.trim() : "";
+    const detail = stderr
+      ? stderr.split("\n").slice(-8).join("\n")
       : error instanceof Error
         ? error.message
-        : "unknown error";
-    throw new Error(`FFmpeg failed to ${action}: ${detail || "no stderr"}`);
+        : "unknown FFmpeg error";
+    throw new Error(`FFmpeg failed to ${action}: ${detail}`, { cause: error });
   }
 }
 
-function describeAsset(id: string, input: string): string {
-  const label = /^https?:\/\//.test(input) && input.length > 4
-    ? new URL(input).hostname
-    : input.length > 100
-      ? `${input.slice(0, 60)}...`
-      : input;
-  return `${id}:${label}`;
+function isExecError(error: unknown): error is { stderr: string } {
+  return typeof error === "object" && error !== null && "stderr" in error && typeof error.stderr === "string";
+}
+
+function resolveAssetPath(filePathOrUrl: string): string {
+  if (/^https?:\/\//.test(filePathOrUrl) || path.isAbsolute(filePathOrUrl)) return filePathOrUrl;
+  const resolved = path.resolve(process.cwd(), filePathOrUrl);
+  const allowedRoots = [path.resolve(process.cwd(), "assets"), path.resolve(process.cwd(), "public")];
+  if (!allowedRoots.some((root) => resolved === root || resolved.startsWith(`${root}${path.sep}`))) {
+    throw new Error(`Unsupported local asset path: ${filePathOrUrl}`);
+  }
+  return resolved;
 }
 
 function backgroundInputArgs(type: RenderPlan["background"]["type"], filePath: string): string[] {
-  if (type === "video") {
-    return ["-stream_loop", "-1", "-i", filePath];
-  }
+  if (type === "video") return ["-stream_loop", "-1", "-i", filePath];
   return ["-loop", "1", "-i", filePath];
 }

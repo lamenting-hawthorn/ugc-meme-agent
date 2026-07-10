@@ -16,7 +16,8 @@ export async function selectAssets(plan: CreativePlan, excludeReactionIds?: stri
   ]);
   const filteredGiphyCandidates = giphyCandidates.filter((candidate) => passesReactionQualityGate(candidate));
 
-  let reactionPool: ReactionAsset[] = filteredGiphyCandidates;
+  const humanCandidates = filteredGiphyCandidates.filter((candidate) => hasHumanSignal(candidate));
+  let reactionPool: ReactionAsset[] = humanCandidates.length > 0 ? humanCandidates : filteredGiphyCandidates;
   let usedLocalFallback = false;
 
   if (reactionPool.length > 0) {
@@ -105,4 +106,9 @@ function passesReactionQualityGate(asset: ReactionAsset): boolean {
   }
   if (asset.width < 180 || asset.height < 180) return false;
   return true;
+}
+
+function hasHumanSignal(asset: ReactionAsset): boolean {
+  const descriptor = `${asset.title ?? ""} ${asset.tags.join(" ")} ${asset.queryUsed ?? ""}`.toLowerCase();
+  return /human|person|people|celebrity|actor|actress|man|woman|guy|girl|boy|face|travolta|rock|garfield|holland/.test(descriptor);
 }

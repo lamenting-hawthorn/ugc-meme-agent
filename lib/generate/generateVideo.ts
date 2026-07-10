@@ -110,20 +110,18 @@ export async function generateVideo(
     }
 
     mark("Rendering video...");
-    let renderPlan = buildRenderPlan(creativePlan, selectedAssets);
-    let rendered: { videoUrl: string; posterUrl: string } | null = null;
+    let rendered: Awaited<ReturnType<typeof renderVideo>>;
 
     try {
-      rendered = await renderVideo(jobId, renderPlan);
+      rendered = await renderWithReactionFallback(jobId, creativePlan, selectedAssets);
     } catch (renderError) {
-      mark("Render failed once, retrying with simpler local assets...");
-      logger.warn("Initial render failed; retrying with known-good local assets", {
+      mark("Remote render failed, retrying with simpler local assets...");
+      logger.warn("Remote render attempts failed; retrying with known-good local assets", {
         jobId,
         error: renderError instanceof Error ? renderError.message : "unknown"
       });
       selectedAssets = buildLocalFallbackAssets(creativePlan);
-      renderPlan = buildRenderPlan(creativePlan, selectedAssets);
-      rendered = await renderVideo(jobId, renderPlan);
+      rendered = await renderVideo(jobId, buildRenderPlan(creativePlan, selectedAssets));
     }
 
     mark("Checking output...");
@@ -161,6 +159,60 @@ export async function generateVideo(
       error: errorMessage
     };
   }
+}
+
+async function renderWithReactionFallback(
+  jobId: string,
+  creativePlan: CreativePlan,
+  selectedAssets: SelectedAssets
+): ReturnType<typeof renderVideo> {
+  const manifest = loadManifest();
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      return await renderVideo(jobId, buildRenderPlan(creativePlan, selectedAssets));
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : "unknown";
+      if (/background-(?:image|video) preparation failed/.test(message) && selectedAssets.background.source === "pexels") {
+        const fallback = manifest.backgrounds.find((asset) => asset.mood === creativePlan.backgroundMood) ?? manifest.backgrounds[0];
+        if (fallback) {
+          logger.warn("Remote background failed preparation; retrying local background", { jobId, error: message });
+          selectedAssets.background = fallback;
+          selectedAssets.reasons = [`Used ${fallback.id} after remote background preparation failed`, ...selectedAssets.reasons];
+          continue;
+        }
+      }
+      if (/audio preparation failed/.test(message) && selectedAssets.audio.source === "freesound") {
+        const fallback = manifest.audio.find((asset) => asset.mood === creativePlan.audioMood) ?? manifest.audio[0];
+        if (fallback) {
+          logger.warn("Remote audio failed preparation; retrying local audio", { jobId, error: message });
+          selectedAssets.audio = fallback;
+          selectedAssets.reasons = [`Used ${fallback.id} after remote audio preparation failed`, ...selectedAssets.reasons];
+          continue;
+        }
+      }
+      if (selectedAssets.runnerUpReaction) {
+        const failedReaction = selectedAssets.reaction;
+        logger.warn("Primary reaction failed during rendering; retrying runner-up", {
+          jobId,
+          reactionId: failedReaction.id,
+          error: message
+        });
+        selectedAssets.reaction = selectedAssets.runnerUpReaction;
+        selectedAssets.runnerUpReaction = undefined;
+        selectedAssets.reasons = [
+          `Rendered ${selectedAssets.reaction.id} after ${failedReaction.id} failed preparation`,
+          ...selectedAssets.reasons
+        ];
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastError;
 }
 
 function buildLocalFallbackAssets(plan: CreativePlan): SelectedAssets {
