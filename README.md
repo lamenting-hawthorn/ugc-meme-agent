@@ -6,7 +6,7 @@ UGC Meme Agent is a production-minded Next.js prototype for generating 7–15 se
 
 A chat-based UGC meme video generator for startups. It reads a product URL, understands the user pain point, writes a short meme caption, matches reaction/audio/background assets, renders a vertical MP4, and returns it in chat.
 
-The system separates creative reasoning from deterministic rendering. The LLM produces structured product and creative plans when an OpenRouter or DeepSeek key is present; by default it now prefers the OpenRouter Qwen VL model for both structured text generation and vision reranking. The deterministic fallback keeps the demo working without external APIs. The asset intelligence layer scores compatible reactions, audio, and backgrounds before FFmpeg composes the final clip.
+The system separates creative reasoning from deterministic rendering. The LLM produces structured product and creative plans when an OpenRouter or DeepSeek key is present; by default it now uses Gemini 3.1 Flash Lite through OpenRouter for both structured text generation and vision reranking. The deterministic fallback keeps the demo working without external APIs. The asset intelligence layer scores compatible reactions, audio, and backgrounds before FFmpeg composes the final clip.
 
 The video planner now auto-loads the installed `reaction-app-ugc-shorts` skill and uses it as the source of truth for reaction-style UGC outputs. The checked-in source skill lives at [`reaction-app-ugc-shorts/SKILL.md`](./reaction-app-ugc-shorts/SKILL.md), and Codex can also install it into `~/.codex/skills/reaction-app-ugc-shorts/`.
 
@@ -31,7 +31,7 @@ Open `http://localhost:3000`.
 ## Cost and API highlights
 
 - **100 GIPHY API calls per hour on a free beta key.** GIPHY's default beta keys are rate-limited to 100 searches/API calls per hour; the app caches provider results and falls back to local assets when the limit is reached. See [GIPHY's API documentation](https://developers.giphy.com/docs/api/).
-- **Very low LLM cost.** The default OpenRouter Qwen3 VL model is priced at **$0.13 input / $0.52 output per 1M tokens**. DeepSeek is priced at **$0.435 per 1M input tokens on cache miss / $0.87 per 1M output tokens**. These rates make normal structured planning and vision reranking extremely inexpensive; for example, 4,000 input + 1,000 output tokens is about **$0.00104 with the VLM** or **$0.00261 with DeepSeek** per call, before any additional calls or media-provider charges. See [OpenRouter pricing](https://openrouter.ai/qwen/qwen3-vl-30b-a3b-thinking) and [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing).
+- **Very low LLM cost.** Gemini 3.1 Flash Lite through OpenRouter is priced at **$0.25 input / $1.50 output per 1M tokens**. DeepSeek is priced at **$0.435 per 1M input tokens on cache miss / $0.87 per 1M output tokens**. For example, 4,000 input + 1,000 output tokens is about **$0.0025 with Gemini** or **$0.00261 with DeepSeek** per call, before any additional calls or media-provider charges. See [OpenRouter pricing](https://openrouter.ai/google/gemini-3.1-flash-lite) and [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing).
 
 The **100 calls/hour limit applies to GIPHY’s free beta API key—not to the LLMs**. These pricing figures are usage rates, not a spending guarantee; actual cost depends on prompt length, reasoning output, number of planning/reranking calls, cache hits, provider routing, and separately billed media APIs. Set provider-side budgets and monitor production usage before opening the endpoint to untrusted traffic.
 
@@ -46,16 +46,16 @@ I'm building CalAI, a calorie-tracking app. Here's the site: calai.app
 Copy `.env.example` to `.env.local`.
 
 ```text
-LLM_PROVIDER=openrouter  # optional; openrouter (default) or deepseek
-DEEPSEEK_API_KEY=    # optional fallback provider for structured text generation
+LLM_PROVIDER=openrouter  # openrouter or deepseek; configured provider is strict
+DEEPSEEK_API_KEY=    # optional alternative provider for structured text generation
 DEEPSEEK_BASE_URL=https://api.deepseek.com/
 DEEPSEEK_MODEL=deepseek-v4-pro
 GIPHY_API_KEY=       # optional; local reaction fallbacks run without it
 PEXELS_API_KEY=      # optional; local backgrounds remain the fallback
 FREESOUND_API_KEY=   # optional; local audio remains the fallback
 OPENROUTER_API_KEY=  # optional; preferred provider for structured text + vision
-OPENROUTER_TEXT_MODEL=qwen/qwen3-vl-30b-a3b-thinking
-OPENROUTER_VISION_MODEL=qwen/qwen3-vl-30b-a3b-instruct
+OPENROUTER_TEXT_MODEL=google/gemini-3.1-flash-lite
+OPENROUTER_VISION_MODEL=google/gemini-3.1-flash-lite
 OPENROUTER_APP_TITLE=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 STORAGE_MODE=local
@@ -69,7 +69,7 @@ Copy `.env.example` to `.env.local` and add only the providers you need. API key
 - `lib/scraping` extracts and validates product URLs, then fetches public metadata with a timeout.
 - `lib/llm` creates schema-validated product understanding and creative plans.
 - `lib/skills` resolves installed reusable skills and injects their instructions into generation at runtime.
-- `lib/assets` loads the local manifest, searches GIPHY `gifs` and `stickers`, and optionally uses an OpenRouter-hosted Qwen VL model to classify the top remote reactions. Selection follows a strict visual hierarchy: real-human stickers first, animated figures second, and generic/random stickers only as fallback. It also pulls remote Pexels backgrounds and Freesound previews when configured, caches provider responses on disk, and scores assets.
+- `lib/assets` loads the local manifest, searches GIPHY `gifs` and `stickers`, and uses Gemini 3.1 Flash Lite through OpenRouter to classify the top remote reactions. Selection requires a real human with the right visible emotion first, uses transparency as a tie-breaker, and allows a better-matching human GIF when no suitable cutout exists. Animated or generic assets are last-resort fallbacks. It also pulls remote Pexels backgrounds and quality-ranked Freesound previews when configured, caches provider responses on disk, and scores assets.
 - `lib/render` builds a deterministic render plan, creates a caption overlay (SVG → PNG via sharp), renders with FFmpeg, and validates the MP4 with `ffprobe`.
 - `public/generated` stores local demo output.
 

@@ -150,7 +150,7 @@ async function callOpenRouterJson(
 
   const model = process.env.OPENROUTER_TEXT_MODEL
     || process.env.OPENROUTER_VISION_MODEL
-    || "qwen/qwen3-vl-30b-a3b-thinking";
+    || "google/gemini-3.1-flash-lite";
   const timeoutMs = options?.timeoutMs ?? 5_000;
 
   try {
@@ -222,7 +222,7 @@ async function callOpenRouterJson(
 
 function providerOrder(): JsonLlmProvider[] {
   const configured = (process.env.LLM_PROVIDER || "").trim().toLowerCase();
-  if (configured === "deepseek") return ["deepseek", "openrouter"];
-  if (configured === "openrouter" || configured === "vl") return ["openrouter", "deepseek"];
+  if (configured === "deepseek") return ["deepseek"];
+  if (configured === "openrouter" || configured === "vl") return ["openrouter"];
   return ["openrouter", "deepseek"];
 }
