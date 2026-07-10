@@ -28,6 +28,13 @@ Open `http://localhost:3000`.
 - SSRF-aware product URL validation, bounded redirects, timeouts, and render budgets.
 - Optional OpenRouter vision reranking for reaction quality.
 
+## Cost and API highlights
+
+- **100 GIPHY API calls per hour on a free beta key.** GIPHY's default beta keys are rate-limited to 100 searches/API calls per hour; the app caches provider results and falls back to local assets when the limit is reached. See [GIPHY's API documentation](https://developers.giphy.com/docs/api/).
+- **Very low LLM cost.** The default OpenRouter Qwen3 VL 30B A3B Thinking model is currently listed at **$0.13 per 1M input tokens and $1.56 per 1M output tokens**. At a representative 4,000 input + 1,000 output tokens per generation, 100 generations cost approximately **$0.21 in LLM usage**—well under $1. Actual spend varies with prompt size, reasoning output, vision reranking, provider routing, and any separately billed media APIs. See [current OpenRouter pricing](https://openrouter.ai/qwen/qwen3-vl-30b-a3b-thinking).
+
+These figures are usage estimates, not a spending guarantee. Set provider-side budgets and monitor production usage before opening the endpoint to untrusted traffic.
+
 Example prompt:
 
 ```text
