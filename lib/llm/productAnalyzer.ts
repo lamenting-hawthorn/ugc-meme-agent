@@ -27,7 +27,7 @@ async function analyzeWithDeepSeek(
       {
         role: "system",
         content:
-          "You are a product and meme-ad strategist for short-form UGC videos. Return only valid JSON. Focus on the painful old workflow and emotional contrast. Enum fields must be exact single tokens, not sentences."
+          "You are a product and meme-ad strategist for short-form UGC videos. Return only valid JSON. Focus on the painful old workflow and emotional contrast. Use these exact enum values: emotionalBeforeState = confused | stressed | annoyed | bored | overwhelmed | embarrassed; emotionalAfterState = relieved | confident | smug | happy | calm."
       },
       {
         role: "user",

@@ -24,7 +24,7 @@ async function planWithDeepSeek(
       {
         role: "system",
         content:
-          "You are a creative director for TikTok/Reels meme ads. Return only valid JSON. The final video has one background, one human reaction clip, one caption, and one music track. Write like a real post, not an ad: lowercase, specific, self-aware, and instantly understandable without narration. Use one of these proven formats: 'me when [relatable situation] and [product payoff]', 'pov: [painful old workflow] until [product payoff]', or '[manual behavior] / [using product]'. Make the product the punchline, not the hero. Keep captions 45-110 characters when possible, never more than 2 ideas, and avoid hashtags, emojis, claims, or corporate words like revolutionize, seamless, unlock, future, powerful. Do not name a specific meme or celebrity. Enum fields must use only the allowed values."
+          "You are a creative director for TikTok/Reels meme ads. Return only valid JSON. The final video has one background, one human reaction clip, one caption, and one music track. Write like a real post, not an ad: lowercase, specific, self-aware, and instantly understandable without narration. Use one of these proven formats: 'me when [relatable situation] and [product payoff]', 'pov: [painful old workflow] until [product payoff]', or '[manual behavior] / [using product]'. Make the product the punchline, not the hero. Keep captions 45-110 characters when possible, never more than 2 ideas, and avoid hashtags, emojis, claims, or corporate words like revolutionize, seamless, unlock, future, powerful. Do not name a specific meme or celebrity. Use these exact enum values: reactionMood = confused | panic | shocked | relief | smug | crying | celebrating; audioMood = funny | dramatic | chill | chaotic | victory; memeFormat = me-when | pov | before-after | pretending-to-know | manual-vs-automated | realization; humorStyle = relatable | absurd | dry | genz | dramatic; backgroundCategory = room | office | sky | phone | gradient | lifestyle; backgroundMood = clean | premium | neutral | dramatic | funny."
       },
       {
         role: "user",
@@ -59,13 +59,50 @@ async function planWithDeepSeek(
       });
       return null;
     }
-    return { ...creativePlanSchema.parse(JSON.parse(result.content)), source: "deepseek" };
+    const parsed = parseCreativePlan(result.content);
+    if (!parsed) return null;
+    return { ...parsed, source: "deepseek" };
   } catch (error) {
     logger.warn("DeepSeek creative planning returned invalid JSON; using deterministic fallback", {
       error: error instanceof Error ? error.message : "unknown"
     });
     return null;
   }
+}
+
+function parseCreativePlan(content: string): CreativePlan | null {
+  const raw = JSON.parse(content) as Record<string, unknown>;
+  const direct = creativePlanSchema.safeParse(raw);
+  if (direct.success) return direct.data;
+
+  const repaired = {
+    ...raw,
+    reactionMood: normalizeEnum(raw.reactionMood, {
+      frustrated: "panic",
+      overwhelmed: "panic",
+      stressed: "panic",
+      annoyed: "confused"
+    }),
+    audioMood: normalizeEnum(raw.audioMood, {
+      quirky: "funny",
+      energetic: "chaotic",
+      calm: "chill",
+      triumphant: "victory"
+    })
+  };
+  const result = creativePlanSchema.safeParse(repaired);
+  if (!result.success) throw result.error;
+
+  logger.info("Normalized DeepSeek creative enum aliases", {
+    reactionMood: String(raw.reactionMood),
+    audioMood: String(raw.audioMood)
+  });
+  return result.data;
+}
+
+function normalizeEnum(value: unknown, aliases: Record<string, string>): unknown {
+  if (typeof value !== "string") return value;
+  return aliases[value.toLowerCase()] ?? value;
 }
 
 function planDeterministically(

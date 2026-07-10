@@ -4,9 +4,6 @@ node_modules
 .cache
 .env
 .env.local
-public/generated/*.mp4
-public/generated/*.json
-public/generated/*.pam
-public/generated/*.jpg
-!.gitkeep
+public/generated/*
+!public/generated/.gitkeep
 .DS_Store

@@ -23,8 +23,10 @@ export async function selectAssets(plan: CreativePlan): Promise<SelectedAssets> 
   // Prefer transparent overlays because they preserve the background and
   // make the reaction feel like the reference creator edits. Full-frame GIFs
   // remain a fallback when GIPHY returns no usable sticker candidates.
-  const stickerCandidates = filteredGiphyCandidates.filter((candidate) => candidate.hasTransparentBackground);
-  const reactionCandidates = stickerCandidates.length > 0 ? stickerCandidates : filteredGiphyCandidates;
+  const humanCandidates = filteredGiphyCandidates.filter((candidate) => hasHumanSignal(candidate));
+  const qualityCandidates = humanCandidates.length > 0 ? humanCandidates : filteredGiphyCandidates;
+  const stickerCandidates = qualityCandidates.filter((candidate) => candidate.hasTransparentBackground);
+  const reactionCandidates = stickerCandidates.length > 0 ? stickerCandidates : qualityCandidates;
   const heuristicReactions = reactionCandidates.sort(
     (a, b) => scoreReaction(plan, b) - scoreReaction(plan, a)
   );
@@ -79,4 +81,9 @@ function passesReactionQualityGate(asset: ReactionAsset): boolean {
   }
   if (asset.width < 180 || asset.height < 180) return false;
   return true;
+}
+
+function hasHumanSignal(asset: ReactionAsset): boolean {
+  const descriptor = `${asset.title ?? ""} ${asset.tags.join(" ")} ${asset.queryUsed ?? ""}`.toLowerCase();
+  return /human|person|people|celebrity|actor|actress|man|woman|guy|girl|boy|face|travolta|rock|garfield|holland/.test(descriptor);
 }

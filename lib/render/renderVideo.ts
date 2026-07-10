@@ -4,6 +4,8 @@ import path from "path";
 import { promisify } from "util";
 import type { RenderPlan } from "@/lib/types";
 import { writeCaptionImage } from "@/lib/render/captionImage";
+import { prepareReactionInput } from "@/lib/render/normalizeReaction";
+import { prepareRemoteInput, type PreparedInput } from "@/lib/render/prepareRemoteInput";
 import { validateOutput } from "@/lib/render/validateOutput";
 
 const execFileAsync = promisify(execFile);
@@ -19,6 +21,11 @@ export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promis
   const backgroundPath = resolveAssetPath(renderPlan.background.filePath);
   const reactionPath = resolveAssetPath(renderPlan.reaction.filePathOrUrl);
   const audioPath = resolveAssetPath(renderPlan.audio.filePath);
+  const preparedInputs = await prepareRenderInputs(jobId, outputDir, renderPlan, {
+    backgroundPath,
+    reactionPath,
+    audioPath
+  });
 
   const filter = [
     `[0:v]scale=${renderPlan.output.width}:${renderPlan.output.height}:force_original_aspect_ratio=increase,crop=${renderPlan.output.width}:${renderPlan.output.height},setsar=1[bg]`,
@@ -27,51 +34,61 @@ export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promis
     "[comp][2:v]overlay=0:70:shortest=0[v]"
   ].join(";");
 
-  await execFileAsync("ffmpeg", [
-    "-y",
-    ...backgroundInputArgs(renderPlan.background.type, backgroundPath),
-    "-stream_loop",
-    "-1",
-    "-i",
-    reactionPath,
-    "-i",
-    captionImage,
-    "-stream_loop",
-    "-1",
-    "-i",
-    audioPath,
-    "-t",
-    String(renderPlan.output.durationSec),
-    "-filter_complex",
-    filter,
-    "-map",
-    "[v]",
-    "-map",
-    "3:a",
-    "-r",
-    String(renderPlan.output.fps),
-    "-c:v",
-    "libx264",
-    "-profile:v",
-    "baseline",
-    "-level",
-    "3.1",
-    "-pix_fmt",
-    "yuv420p",
-    "-color_range",
-    "tv",
-    "-movflags",
-    "+faststart",
-    "-c:a",
-    "aac",
-    "-shortest",
-    outputPath
-  ], { maxBuffer: 1024 * 1024 * 8 });
+  try {
+    await runFfmpeg([
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      ...backgroundInputArgs(renderPlan.background.type, preparedInputs.background.path),
+      "-stream_loop",
+      "-1",
+      "-i",
+      preparedInputs.reaction.path,
+      "-i",
+      captionImage,
+      "-stream_loop",
+      "-1",
+      "-i",
+      preparedInputs.audio.path,
+      "-t",
+      String(renderPlan.output.durationSec),
+      "-filter_complex",
+      filter,
+      "-map",
+      "[v]",
+      "-map",
+      "3:a",
+      "-r",
+      String(renderPlan.output.fps),
+      "-c:v",
+      "libx264",
+      "-profile:v",
+      "baseline",
+      "-level",
+      "3.1",
+      "-pix_fmt",
+      "yuv420p",
+      "-color_range",
+      "tv",
+      "-movflags",
+      "+faststart",
+      "-c:a",
+      "aac",
+      "-shortest",
+      outputPath
+    ]);
+  } finally {
+    await preparedInputs.cleanup();
+  }
 
   await validateOutput(outputPath, renderPlan.output.durationSec);
   const posterPath = path.join(outputDir, `${jobId}.jpg`);
-  await execFileAsync("ffmpeg", [
+  await runFfmpeg([
     "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error",
     "-ss",
     "2",
     "-i",
@@ -83,13 +100,70 @@ export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promis
     "-q:v",
     "3",
     posterPath
-  ], { maxBuffer: 1024 * 1024 * 4 });
+  ]);
 
   return {
     filePath: outputPath,
     videoUrl: `/generated/${jobId}.mp4`,
     posterUrl: `/generated/${jobId}.jpg`
   };
+}
+
+async function prepareRenderInputs(
+  jobId: string,
+  outputDir: string,
+  renderPlan: RenderPlan,
+  paths: { backgroundPath: string; reactionPath: string; audioPath: string }
+): Promise<{ background: PreparedInput; reaction: PreparedInput; audio: PreparedInput; cleanup: () => Promise<void> }> {
+  const results = await Promise.allSettled([
+    prepareRemoteInput(
+      paths.backgroundPath,
+      jobId,
+      outputDir,
+      renderPlan.background.type === "video" ? "background-video" : "background-image"
+    ),
+    prepareReactionInput({
+      filePathOrUrl: paths.reactionPath,
+      previewImageUrl: renderPlan.reaction.previewImageUrl
+    }, jobId, outputDir),
+    prepareRemoteInput(paths.audioPath, jobId, outputDir, "audio")
+  ]);
+  const prepared = results
+    .filter((result): result is PromiseFulfilledResult<PreparedInput> => result.status === "fulfilled")
+    .map((result) => result.value);
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failure) {
+    await Promise.allSettled(prepared.map((input) => input.cleanup()));
+    throw failure.reason;
+  }
+
+  const [background, reaction, audio] = prepared;
+  return {
+    background,
+    reaction,
+    audio,
+    cleanup: async () => {
+      await Promise.allSettled(prepared.map((input) => input.cleanup()));
+    }
+  };
+}
+
+async function runFfmpeg(args: string[]): Promise<void> {
+  try {
+    await execFileAsync("ffmpeg", args, {
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 45_000,
+      killSignal: "SIGKILL"
+    });
+  } catch (error) {
+    const stderr = isExecError(error) ? error.stderr.trim() : "";
+    const detail = stderr ? stderr.split("\n").slice(-8).join("\n") : "unknown FFmpeg error";
+    throw new Error(`FFmpeg render failed: ${detail}`, { cause: error });
+  }
+}
+
+function isExecError(error: unknown): error is { stderr: string } {
+  return typeof error === "object" && error !== null && "stderr" in error && typeof error.stderr === "string";
 }
 
 function resolveAssetPath(filePathOrUrl: string): string {
