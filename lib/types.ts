@@ -125,6 +125,7 @@ export type GenerateVideoRequest = {
     productUnderstanding?: ProductUnderstanding;
     lastCreativePlan?: CreativePlan;
     lastReactionAssetId?: string;
+    recentReactionAssetIds?: string[];
     conversationMemory?: ConversationMemoryEntry[];
   };
 };

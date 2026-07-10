@@ -1,4 +1,6 @@
 import type { CreativePlan, ReactionAsset } from "@/lib/types";
+import { inferReactionMoodFromTitle } from "@/lib/assets/reactionVisualCategory";
+import { buildGiphySearches, type GiphySearch } from "@/lib/assets/giphySearchPlan";
 import { logger } from "@/lib/utils/logger";
 
 type GiphyResponse = {
@@ -25,8 +27,6 @@ type GiphyRendition = {
   height?: string;
 };
 
-type SearchMode = "gifs" | "stickers";
-
 type CacheEntry = {
   expiresAt: number;
   assets: ReactionAsset[];
@@ -34,8 +34,7 @@ type CacheEntry = {
 
 const SAFE_RATINGS = new Set(["g", "pg", "pg-13"]);
 const CACHE_TTL_MS = 10 * 60 * 1000;
-const QUERY_LIMIT = 6;
-const RESULT_LIMIT = 8;
+const RESULT_LIMIT = 12;
 const cache = new Map<string, CacheEntry>();
 
 export async function fetchGiphyCandidates(plan: CreativePlan): Promise<ReactionAsset[]> {
@@ -43,9 +42,7 @@ export async function fetchGiphyCandidates(plan: CreativePlan): Promise<Reaction
   if (!apiKey) return [];
 
   const candidates = new Map<string, ReactionAsset>();
-  const queries = dedupeQueries([...plan.giphyQueries, ...curatedQueriesForMood(plan.reactionMood)]).slice(0, QUERY_LIMIT);
-
-  const searches = queries.flatMap((query) => modesForQuery(query).map((mode) => ({ query, mode })));
+  const searches = buildGiphySearches(plan);
   const results = await Promise.allSettled(
     searches.map(({ query, mode }) => fetchQueryMode({ apiKey, query, mode, mood: plan.reactionMood }))
   );
@@ -68,7 +65,7 @@ export async function fetchGiphyCandidates(plan: CreativePlan): Promise<Reaction
 async function fetchQueryMode(input: {
   apiKey: string;
   query: string;
-  mode: SearchMode;
+  mode: GiphySearch["mode"];
   mood: CreativePlan["reactionMood"];
 }): Promise<ReactionAsset[]> {
   // Stickers are not tagged with "reaction" — GIPHY returns zero sticker results
@@ -113,7 +110,7 @@ async function fetchQueryMode(input: {
 
 function toReactionAsset(
   item: NonNullable<GiphyResponse["data"]>[number],
-  input: { query: string; mode: SearchMode; mood: CreativePlan["reactionMood"] }
+  input: { query: string; mode: GiphySearch["mode"]; mood: CreativePlan["reactionMood"] }
 ): ReactionAsset | null {
   const rating = item.rating?.toLowerCase() ?? "pg";
   if (!SAFE_RATINGS.has(rating)) return null;
@@ -134,7 +131,7 @@ function toReactionAsset(
     filePathOrUrl: rendition.url,
     previewImageUrl: pickPreviewImageUrl(item.images),
     type: rendition.type,
-    mood: input.mood,
+    mood: inferReactionMoodFromTitle(title) ?? input.mood,
     energy: energyForMood(input.mood),
     action: actionForMood(input.mood),
     hasTransparentBackground: transparent,
@@ -194,37 +191,6 @@ function pickBestRendition(
     }
   }
   return null;
-}
-
-function modesForQuery(query: string): SearchMode[] {
-  if (/sticker|transparent|overlay|cutout/i.test(query)) return ["stickers", "gifs"];
-  return ["gifs", "stickers"];
-}
-
-function curatedQueriesForMood(mood: CreativePlan["reactionMood"]): string[] {
-  const common = ["celebrity reaction", "funny celebrity reaction", "side eye reaction", "envy reaction"];
-  const byMood: Partial<Record<CreativePlan["reactionMood"], string[]>> = {
-    confused: ["Andrew Garfield reaction", "confused celebrity reaction", "what reaction"],
-    shocked: ["The Rock reaction", "Tom Holland shocked reaction", "disbelief reaction"],
-    panic: ["Tom Holland panic reaction", "celebrity panic reaction", "stressed reaction"],
-    relief: ["celebrity relief reaction", "smug reaction", "finally reaction"],
-    smug: ["Andrew Garfield smug reaction", "winning reaction", "side eye celebrity"],
-    crying: ["celebrity crying reaction", "sad reaction", "defeated reaction"],
-    celebrating: ["The Rock celebration reaction", "celebrity laughing reaction", "happy dance reaction"]
-  };
-  return [...(byMood[mood] ?? []), ...common];
-}
-
-function dedupeQueries(queries: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const query of queries) {
-    const normalized = query.trim().toLowerCase();
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    result.push(query.trim());
-  }
-  return result;
 }
 
 function tokenize(text: string): string[] {

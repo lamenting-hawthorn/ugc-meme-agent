@@ -1,8 +1,9 @@
 import { z } from "zod";
+import sharp from "sharp";
 import type { CreativePlan, ReactionAsset } from "@/lib/types";
 import {
+  compareReactionVisualPriority,
   inferReactionVisualCategoryFromTitle,
-  REACTION_VISUAL_CATEGORY_PRIORITY,
   titleSignalsDisallowedVisual
 } from "@/lib/assets/reactionVisualCategory";
 import { logger } from "@/lib/utils/logger";
@@ -49,12 +50,12 @@ export async function rerankReactionCandidatesWithVision(
 ): Promise<VisionRerankResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    return { ranked: null, overallReason: "Qwen VL skipped: OPENROUTER_API_KEY is not configured" };
+    return { ranked: null, overallReason: "Gemini vision skipped: OPENROUTER_API_KEY is not configured" };
   }
 
   const visionCandidates = selectDiverseVisionCandidates(candidates);
   if (visionCandidates.length < 2) {
-    return { ranked: null, overallReason: "Qwen VL skipped: fewer than two previewable candidates" };
+    return { ranked: null, overallReason: "Gemini vision skipped: fewer than two previewable candidates" };
   }
 
   const content: Array<
@@ -67,14 +68,16 @@ export async function rerankReactionCandidatesWithVision(
     }
   ];
 
-  for (const candidate of visionCandidates) {
+  const visionImages = await Promise.all(visionCandidates.map(normalizeVisionImage));
+
+  for (const [index, candidate] of visionCandidates.entries()) {
     content.push({
       type: "text",
       text: `Candidate ${candidate.id}. Title: ${candidate.title ?? "untitled"}. Tags: ${candidate.tags.join(", ")}.`
     });
     content.push({
       type: "image_url",
-      image_url: { url: visionImageUrl(candidate) }
+      image_url: { url: visionImages[index] }
     });
   }
 
@@ -88,7 +91,7 @@ export async function rerankReactionCandidatesWithVision(
         ...(process.env.OPENROUTER_APP_TITLE ? { "X-OpenRouter-Title": process.env.OPENROUTER_APP_TITLE } : {})
       },
       body: JSON.stringify({
-        model: process.env.OPENROUTER_VISION_MODEL || "qwen/qwen3-vl-30b-a3b-instruct",
+        model: process.env.OPENROUTER_VISION_MODEL || "google/gemini-3.1-flash-lite",
         temperature: 0,
         max_tokens: 2000,
         response_format: {
@@ -142,14 +145,14 @@ export async function rerankReactionCandidatesWithVision(
       });
       return {
         ranked: null,
-        overallReason: `Qwen VL failed with HTTP ${response.status}; heuristic reaction ranking used`
+        overallReason: `Gemini vision failed with HTTP ${response.status}; heuristic reaction ranking used`
       };
     }
 
     const raw = payload.choices?.[0]?.message?.content;
     if (!raw) {
       logger.info("OpenRouter vision rerank returned empty content; keeping heuristic order");
-      return { ranked: null, overallReason: "Qwen VL returned empty content; heuristic reaction ranking used" };
+      return { ranked: null, overallReason: "Gemini vision returned empty content; heuristic reaction ranking used" };
     }
 
     const parsed = visionRankingSchema.parse(JSON.parse(raw)) as VisionRanking;
@@ -167,7 +170,7 @@ export async function rerankReactionCandidatesWithVision(
       });
       return {
         ranked: null,
-        overallReason: `Qwen VL returned ${scoreById.size}/${visionCandidates.length} candidate classifications; heuristic reaction ranking used`
+        overallReason: `Gemini vision returned ${scoreById.size}/${visionCandidates.length} candidate classifications; heuristic reaction ranking used`
       };
     }
 
@@ -192,9 +195,8 @@ export async function rerankReactionCandidatesWithVision(
       const aScore = scoreById.get(a.id);
       const bScore = scoreById.get(b.id);
       if (aScore && bScore) {
-        const categoryDifference = REACTION_VISUAL_CATEGORY_PRIORITY[b.visualCategory ?? bScore.visualCategory]
-          - REACTION_VISUAL_CATEGORY_PRIORITY[a.visualCategory ?? aScore.visualCategory];
-        if (categoryDifference !== 0) return categoryDifference;
+        const visualPriority = compareReactionVisualPriority(a, b);
+        if (visualPriority !== 0) return visualPriority;
         if (bScore.score !== aScore.score) return bScore.score - aScore.score;
       } else if (aScore || bScore) {
         return aScore ? -1 : 1;
@@ -209,7 +211,7 @@ export async function rerankReactionCandidatesWithVision(
     });
     return {
       ranked: visuallyAccepted,
-      overallReason: `Qwen VL reviewed ${scoreById.size} visual candidates using human > animated > generic priority. ${parsed.reasoning}`
+      overallReason: `Gemini vision reviewed ${scoreById.size} visual candidates using human > animated > generic priority. ${parsed.reasoning}`
     };
   } catch (error) {
     logger.warn("OpenRouter vision rerank threw; keeping heuristic order", {
@@ -218,7 +220,7 @@ export async function rerankReactionCandidatesWithVision(
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
       ranked: null,
-      overallReason: `Qwen VL failed: ${detail}; heuristic reaction ranking used`
+      overallReason: `Gemini vision failed: ${detail}; heuristic reaction ranking used`
     };
   }
 }
@@ -244,11 +246,20 @@ function buildPrompt(plan: CreativePlan, candidates: ReactionAsset[]): string {
   ].join("\n");
 }
 
-function visionImageUrl(candidate: ReactionAsset): string {
-  if (candidate.type === "gif" && /^https?:\/\//.test(candidate.filePathOrUrl)) {
-    return candidate.filePathOrUrl;
+async function normalizeVisionImage(candidate: ReactionAsset): Promise<string> {
+  const source = candidate.previewImageUrl!;
+  try {
+    const response = await fetch(source, { signal: AbortSignal.timeout(2500) });
+    if (!response.ok) return source;
+    const input = Buffer.from(await response.arrayBuffer());
+    const jpeg = await sharp(input, { animated: false })
+      .resize({ width: 360, height: 360, fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 78 })
+      .toBuffer();
+    return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+  } catch {
+    return source;
   }
-  return candidate.previewImageUrl!;
 }
 
 function selectDiverseVisionCandidates(candidates: ReactionAsset[]): ReactionAsset[] {

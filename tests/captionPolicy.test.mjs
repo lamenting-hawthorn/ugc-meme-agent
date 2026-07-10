@@ -5,6 +5,7 @@ import {
   lacksConcreteProductAnchor,
   wasCaptionPreviouslyUsed
 } from "../lib/llm/captionPolicy.ts";
+import { appendMemory } from "../lib/chat/memoryWindow.ts";
 
 const resultProduct = {
   productName: "Result",
@@ -64,4 +65,31 @@ test("rejects generic broad-platform captions without a concrete product capabil
     ),
     true
   );
+});
+
+test("caption history survives repeated real chat cycles", () => {
+  let memory = [];
+  const captions = [];
+
+  for (let index = 0; index < 6; index += 1) {
+    memory = appendMemory(
+      memory,
+      {
+        role: "user",
+        type: "generation_request",
+        summary: index === 0 ? "generate video" : "generate a new version",
+        rawText: index === 0 ? "generate video" : "generate a new version"
+      }
+    );
+    const caption = buildDistinctFallbackCaption(resultProduct, undefined, memory);
+    captions.push(caption);
+    memory = appendMemory(memory, {
+      role: "assistant",
+      type: "result_summary",
+      summary: `Generated cut with caption: ${caption}`,
+      rawText: caption
+    });
+  }
+
+  assert.equal(new Set(captions).size, 6);
 });

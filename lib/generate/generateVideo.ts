@@ -90,7 +90,7 @@ export async function generateVideo(
     mark("Searching reaction clips...");
     mark("Matching audio and background...");
 
-    const excludeIds: string[] = [];
+    const excludeIds = [...new Set(request.previousContext?.recentReactionAssetIds ?? [])];
     if (request.previousContext?.lastReactionAssetId) {
       excludeIds.push(request.previousContext.lastReactionAssetId);
     }
@@ -100,8 +100,7 @@ export async function generateVideo(
     // If the winner is still the excluded reaction (e.g. only one candidate
     // was available) and a runner-up exists, swap them.
     if (
-      request.previousContext?.lastReactionAssetId &&
-      selectedAssets.reaction.id === request.previousContext.lastReactionAssetId &&
+      excludeIds.includes(selectedAssets.reaction.id) &&
       selectedAssets.runnerUpReaction
     ) {
       const previousReaction = selectedAssets.reaction;

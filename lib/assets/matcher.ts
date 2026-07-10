@@ -4,9 +4,10 @@ import { fetchPexelsBackgroundCandidates } from "@/lib/assets/pexels";
 import { fetchFreesoundCandidates } from "@/lib/assets/freesound";
 import { loadManifest } from "@/lib/assets/manifest";
 import {
+  compareReactionVisualPriority,
   formatReactionVisualCategory,
   inferReactionVisualCategoryFromTitle,
-  REACTION_VISUAL_CATEGORY_PRIORITY
+  prioritizeReactionVisualCategories
 } from "@/lib/assets/reactionVisualCategory";
 import { rerankReactionCandidatesWithVision } from "@/lib/llm/openrouterVision";
 import { scoreAudio, scoreBackground, scoreReaction } from "@/lib/assets/scoring";
@@ -24,13 +25,7 @@ export async function selectAssets(plan: CreativePlan, excludeReactionIds?: stri
   let reactionPool: ReactionAsset[] = filteredGiphyCandidates;
   let usedLocalFallback = false;
 
-  if (reactionPool.length > 0) {
-    // Prefer transparent overlays because they preserve the background and
-    // make the reaction feel like the reference creator edits. Full-frame GIFs
-    // remain a fallback when GIPHY returns no usable sticker candidates.
-    const stickerCandidates = reactionPool.filter((candidate) => candidate.hasTransparentBackground);
-    reactionPool = stickerCandidates.length > 0 ? stickerCandidates : reactionPool;
-  } else {
+  if (reactionPool.length === 0) {
     // GIPHY returned no usable candidates — fall back to the local manifest
     // clips so the demo keeps working without an external reaction source.
     logger.warn("GIPHY returned no usable reaction candidates; using local fallback reactions", {
@@ -119,14 +114,16 @@ function inferVisualCategoryFromMetadata(asset: ReactionAsset): ReactionVisualCa
 }
 
 function rankReactionsWithoutVision(plan: CreativePlan, candidates: ReactionAsset[]): ReactionAsset[] {
-  return candidates
+  const categorized = candidates
     .map((candidate) => ({
       ...candidate,
       visualCategory: inferVisualCategoryFromMetadata(candidate)
-    }))
-    .sort((a, b) => {
-      const categoryDifference = REACTION_VISUAL_CATEGORY_PRIORITY[b.visualCategory!]
-        - REACTION_VISUAL_CATEGORY_PRIORITY[a.visualCategory!];
-      return categoryDifference !== 0 ? categoryDifference : scoreReaction(plan, b) - scoreReaction(plan, a);
-    });
+    }));
+  return prioritizeReactionVisualCategories(categorized).sort((a, b) => {
+    const visualPriority = compareReactionVisualPriority(a, b);
+    if (visualPriority !== 0) return visualPriority;
+    const fitDifference = scoreReaction(plan, b) - scoreReaction(plan, a);
+    if (Math.abs(fitDifference) > 0.03) return fitDifference;
+    return Number(b.hasTransparentBackground) - Number(a.hasTransparentBackground);
+  });
 }

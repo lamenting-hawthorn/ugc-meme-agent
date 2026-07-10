@@ -3,6 +3,7 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { MessageBubble, type ChatMessage } from "@/components/MessageBubble";
 import { appendMemory, buildMemoryEntry } from "@/lib/chat/memory";
+import { appendRecentReactionId } from "@/lib/chat/regenerationHistory";
 import type { GenerateVideoResponse, ProductUnderstanding, CreativePlan } from "@/lib/types";
 
 type StreamEvent =
@@ -26,6 +27,7 @@ export function Chat() {
     productUnderstanding?: ProductUnderstanding;
     lastCreativePlan?: CreativePlan;
     lastReactionAssetId?: string;
+    recentReactionAssetIds?: string[];
     conversationMemory?: import("@/lib/types").ConversationMemoryEntry[];
   }>({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -46,19 +48,20 @@ export function Chat() {
     setBusy(true);
     setLiveProgress([]);
     setMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text }]);
-    setLastContext((current) => ({
-      ...current,
+    const requestContext = {
+      ...lastContext,
       conversationMemory: appendMemory(
-        current.conversationMemory ?? [],
+        lastContext.conversationMemory ?? [],
         buildMemoryEntry({ role: "user", text })
       )
-    }));
+    };
+    setLastContext(requestContext);
 
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: text, previousContext: lastContext })
+        body: JSON.stringify({ message: text, previousContext: requestContext })
       });
 
       const contentType = response.headers.get("content-type") ?? "";
@@ -124,6 +127,10 @@ export function Chat() {
         productUnderstanding: result.productUnderstanding ?? current.productUnderstanding,
         lastCreativePlan: result.creativePlan ?? current.lastCreativePlan,
         lastReactionAssetId: result.selectedAssets?.reaction.id ?? current.lastReactionAssetId,
+        recentReactionAssetIds: appendRecentReactionId(
+          current.recentReactionAssetIds ?? [],
+          result.selectedAssets?.reaction.id
+        ),
         conversationMemory: appendMemory(
           current.conversationMemory ?? [],
           buildMemoryEntry({
@@ -215,8 +222,8 @@ export function Chat() {
         <button type="button" onClick={() => void submit("less cringe")} disabled={!canRegenerate || busy}>
           Less cringe
         </button>
-        <button type="button" onClick={() => void submit("try another gif")} disabled={!canRegenerate || busy}>
-          New GIF
+        <button type="button" onClick={() => void submit("generate a new version")} disabled={!canRegenerate || busy}>
+          New version
         </button>
       </div>
 

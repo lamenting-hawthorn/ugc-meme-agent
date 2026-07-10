@@ -1,7 +1,7 @@
 import type { ConversationMemoryEntry } from "@/lib/types";
 import { extractFirstUrl } from "@/lib/scraping/extractUrl";
+export { appendMemory } from "@/lib/chat/memoryWindow";
 
-const MAX_MEMORY_ENTRIES = 5;
 const MAX_SUMMARY_LENGTH = 140;
 const MAX_RAW_TEXT_LENGTH = 260;
 
@@ -25,15 +25,6 @@ export function buildMemoryEntry(input: {
   };
 }
 
-export function appendMemory(
-  current: ConversationMemoryEntry[],
-  candidate: ConversationMemoryEntry | null
-): ConversationMemoryEntry[] {
-  if (!candidate) return current;
-  const next = [...current, candidate];
-  return next.slice(-MAX_MEMORY_ENTRIES);
-}
-
 export function formatConversationMemory(memory: ConversationMemoryEntry[] | undefined): string {
   if (!memory?.length) return "Conversation memory: none";
   return [
@@ -49,7 +40,7 @@ function classifyMemoryType(
 ): ConversationMemoryEntry["type"] | null {
   if (role === "assistant" && hasResultCaption) return "result_summary";
   if (extractFirstUrl(text)) return "product_input";
-  if (/^(yes|yep|yeah|yes video|video|make video|make the video|generate video|go ahead|go on)$/i.test(text)) {
+  if (/^(yes|yep|yeah|yes video|video|make video|make the video|generate video|go ahead|go on|again|regenerate|generate (?:a )?new version|try again)$/i.test(text)) {
     return "generation_request";
   }
   if (/funnier|dramatic|less cringe|chaotic|genz|premium|cleaner|tone it down/.test(text)) {
