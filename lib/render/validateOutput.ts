@@ -1,6 +1,7 @@
 import { access, stat } from "fs/promises";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import ffprobeInstaller from "@ffprobe-installer/ffprobe";
 
 const execFileAsync = promisify(execFile);
 
@@ -10,7 +11,7 @@ export async function validateOutput(filePath: string, expectedDurationSec: numb
   if (file.size < 20_000) throw new Error("rendered file is unexpectedly small");
 
   try {
-    const { stdout } = await execFileAsync("ffprobe", [
+    const { stdout } = await execFileAsync(ffprobeInstaller.path, [
       "-v",
       "error",
       "-show_entries",
