@@ -31,9 +31,9 @@ Open `http://localhost:3000`.
 ## Cost and API highlights
 
 - **100 GIPHY API calls per hour on a free beta key.** GIPHY's default beta keys are rate-limited to 100 searches/API calls per hour; the app caches provider results and falls back to local assets when the limit is reached. See [GIPHY's API documentation](https://developers.giphy.com/docs/api/).
-- **Very low LLM cost.** The default OpenRouter Qwen3 VL 30B A3B Thinking model is currently listed at **$0.13 per 1M input tokens and $1.56 per 1M output tokens**. At a representative 4,000 input + 1,000 output tokens per generation, 100 generations cost approximately **$0.21 in LLM usage**—well under $1. Actual spend varies with prompt size, reasoning output, vision reranking, provider routing, and any separately billed media APIs. See [current OpenRouter pricing](https://openrouter.ai/qwen/qwen3-vl-30b-a3b-thinking).
+- **Very low LLM cost.** The default OpenRouter Qwen3 VL model is priced at **$0.13 input / $0.52 output per 1M tokens**. DeepSeek is priced at **$0.435 per 1M input tokens on cache miss / $0.87 per 1M output tokens**. These rates make normal structured planning and vision reranking extremely inexpensive; for example, 4,000 input + 1,000 output tokens is about **$0.00104 with the VLM** or **$0.00261 with DeepSeek** per call, before any additional calls or media-provider charges. See [OpenRouter pricing](https://openrouter.ai/qwen/qwen3-vl-30b-a3b-thinking) and [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing).
 
-These figures are usage estimates, not a spending guarantee. Set provider-side budgets and monitor production usage before opening the endpoint to untrusted traffic.
+The **100 calls/hour limit applies to GIPHY’s free beta API key—not to the LLMs**. These pricing figures are usage rates, not a spending guarantee; actual cost depends on prompt length, reasoning output, number of planning/reranking calls, cache hits, provider routing, and separately billed media APIs. Set provider-side budgets and monitor production usage before opening the endpoint to untrusted traffic.
 
 Example prompt:
 
