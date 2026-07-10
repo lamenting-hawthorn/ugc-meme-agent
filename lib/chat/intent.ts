@@ -1,7 +1,7 @@
 import type { Intent, VibeOverride } from "@/lib/types";
 import { extractFirstUrl } from "@/lib/scraping/extractUrl";
 
-export function classifyIntent(message: string): { intent: Intent; vibeOverride?: VibeOverride } {
+export function classifyIntent(message: string): { intent: Intent; vibeOverride?: VibeOverride; regenerateReactionOnly?: boolean } {
   const normalized = message.trim().toLowerCase();
   const hasUrl = Boolean(extractFirstUrl(message));
 
@@ -18,7 +18,10 @@ export function classifyIntent(message: string): { intent: Intent; vibeOverride?
   if (/funnier|funny|more\s+gen\s*z|genz|chaotic/.test(normalized)) {
     return { intent: "change_vibe", vibeOverride: normalized.includes("chaotic") ? "chaotic" : "funny" };
   }
-  if (/again|another|regenerate|try another|different gif|new version/.test(normalized)) {
+  if (/another\s+(gif|reaction|sticker)|different\s+(gif|reaction|sticker)|try\s+(another\s+)?(?:gif|reaction|sticker)|new\s+gif|new\s+reaction/.test(normalized)) {
+    return { intent: "regenerate", regenerateReactionOnly: true };
+  }
+  if (/again|regenerate|new version|try again|different version/.test(normalized)) {
     return { intent: "regenerate" };
   }
   if (/what can you do|how does this work|capabilit|help/.test(normalized)) {

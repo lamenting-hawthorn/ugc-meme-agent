@@ -21,7 +21,7 @@ export type ProductUnderstanding = {
   emotionalBeforeState: "confused" | "stressed" | "annoyed" | "bored" | "overwhelmed" | "embarrassed";
   emotionalAfterState: "relieved" | "confident" | "smug" | "happy" | "calm";
   memeAngles: string[];
-  source?: "deepseek" | "deterministic";
+  source?: "openrouter" | "deepseek" | "deterministic";
 };
 
 export type CreativePlan = {
@@ -35,7 +35,8 @@ export type CreativePlan = {
   durationSec: number;
   template: "top-caption-bottom-reaction";
   giphyQueries: string[];
-  source?: "deepseek" | "deterministic";
+  source?: "openrouter" | "deepseek" | "deterministic";
+  appliedSkillId?: "reaction-app-ugc-shorts";
 };
 
 export type ReactionAsset = {
@@ -116,6 +117,7 @@ export type RenderPlan = {
 export type GenerateVideoRequest = {
   message: string;
   vibeOverride?: VibeOverride;
+  regenerateReactionOnly?: boolean;
   previousContext?: {
     productUnderstanding?: ProductUnderstanding;
     lastCreativePlan?: CreativePlan;
@@ -136,5 +138,6 @@ export type GenerateVideoResponse = {
   progress?: string[];
   error?: string;
   fallbackUsed?: boolean;
-  llmProvider?: "deepseek" | "deterministic";
+  llmProvider?: "openrouter" | "deepseek" | "deterministic";
+  appliedSkillId?: "reaction-app-ugc-shorts";
 };

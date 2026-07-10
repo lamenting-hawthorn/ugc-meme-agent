@@ -10,10 +10,14 @@
     "seed-assets": "node scripts/seed-assets.mjs"
   },
   "dependencies": {
-    "@next/env": "^15.1.0",
-    "next": "^15.1.0",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@next/env": "^16.2.10",
+    "@types/ffmpeg-installer__ffmpeg": "^1.0.2",
+    "@vercel/blob": "^2.6.1",
+    "next": "^16.2.10",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sharp": "^0.34.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -21,7 +25,7 @@
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "eslint": "^9.17.0",
-    "eslint-config-next": "^15.1.0",
+    "eslint-config-next": "^16.2.10",
     "typescript": "^5.7.2"
   },
   "overrides": {

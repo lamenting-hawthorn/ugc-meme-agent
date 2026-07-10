@@ -58,15 +58,18 @@ async function analyzeWithDeepSeek(
       }
     ]);
     if (!result.ok) {
-      logger.warn("DeepSeek product analysis unavailable; using deterministic fallback", {
+      logger.warn("Structured product analysis unavailable; using deterministic fallback", {
+        provider: result.provider,
+        model: result.model,
         reason: result.reason,
-        detail: result.detail
+        detail: result.detail,
+        elapsedMs: result.elapsedMs
       });
       return null;
     }
-    return { ...productUnderstandingSchema.parse(JSON.parse(result.content)), source: "deepseek" };
+    return { ...productUnderstandingSchema.parse(JSON.parse(result.content)), source: result.provider };
   } catch (error) {
-    logger.warn("DeepSeek product analysis returned invalid JSON; using deterministic fallback", {
+    logger.warn("Structured product analysis returned invalid JSON; using deterministic fallback", {
       error: error instanceof Error ? error.message : "unknown"
     });
     return null;

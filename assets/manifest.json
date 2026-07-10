@@ -138,6 +138,17 @@
       "hasBeatDrop": false,
       "license": "demo-local",
       "tags": ["chaotic", "panic", "meme"]
+    },
+    {
+      "id": "victory-fanfare-01",
+      "filePath": "assets/audio/victory-fanfare-01.mp3",
+      "mood": "victory",
+      "energy": "high",
+      "durationSec": 8,
+      "hasBeatDrop": true,
+      "beatDropAtSec": 1.5,
+      "license": "demo-local",
+      "tags": ["victory", "celebration", "triumph", "win"]
     }
   ]
 }

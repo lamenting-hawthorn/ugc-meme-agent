@@ -58,5 +58,6 @@ createTone("funny-bounce-01.mp3", 520);
 createTone("dramatic-hit-01.mp3", 180);
 createTone("chill-loop-01.mp3", 330);
 createTone("chaotic-beep-01.mp3", 760);
+createTone("victory-fanfare-01.mp3", 660);
 
 console.log("Seeded local demo assets.");

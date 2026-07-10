@@ -5,9 +5,11 @@ import { MessageBubble, type ChatMessage } from "@/components/MessageBubble";
 import { appendMemory, buildMemoryEntry } from "@/lib/chat/memory";
 import type { GenerateVideoResponse, ProductUnderstanding, CreativePlan } from "@/lib/types";
 
-type ChatResponse =
-  | { type: "reply"; message: string }
-  | { type: "generation"; message: string; result: GenerateVideoResponse };
+type StreamEvent =
+  | { type: "progress"; stage: string }
+  | { type: "result"; data: GenerateVideoResponse };
+
+type ReplyResponse = { type: "reply"; message: string };
 
 export function Chat() {
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -19,6 +21,7 @@ export function Chat() {
   ]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [liveProgress, setLiveProgress] = useState<string[]>([]);
   const [lastContext, setLastContext] = useState<{
     productUnderstanding?: ProductUnderstanding;
     lastCreativePlan?: CreativePlan;
@@ -41,6 +44,7 @@ export function Chat() {
     if (!text || busy) return;
     setInput("");
     setBusy(true);
+    setLiveProgress([]);
     setMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", text }]);
     setLastContext((current) => ({
       ...current,
@@ -56,31 +60,13 @@ export function Chat() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: text, previousContext: lastContext })
       });
-      const payload = (await response.json()) as ChatResponse;
-      if (payload.type === "generation") {
-        setLastContext((current) => ({
-          productUnderstanding: payload.result.productUnderstanding ?? current.productUnderstanding,
-          lastCreativePlan: payload.result.creativePlan ?? current.lastCreativePlan,
-          lastReactionAssetId: payload.result.selectedAssets?.reaction.id ?? current.lastReactionAssetId,
-          conversationMemory: appendMemory(
-            current.conversationMemory ?? [],
-            buildMemoryEntry({
-              role: "assistant",
-              text: payload.message || payload.result.caption || "Generated video result",
-              resultCaption: payload.result.caption
-            })
-          )
-        }));
-        setMessages((current) => [
-          ...current,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            text: payload.message,
-            result: payload.result
-          }
-        ]);
+
+      const contentType = response.headers.get("content-type") ?? "";
+
+      if (contentType.includes("application/x-ndjson")) {
+        await handleNdjsonStream(response);
       } else {
+        const payload = (await response.json()) as ReplyResponse;
         setLastContext((current) => ({
           ...current,
           conversationMemory: appendMemory(
@@ -97,7 +83,65 @@ export function Chat() {
       ]);
     } finally {
       setBusy(false);
+      setLiveProgress([]);
       inputRef.current?.focus();
+    }
+  }
+
+  async function handleNdjsonStream(response: Response): Promise<void> {
+    const reader = response.body?.getReader();
+    if (!reader) return;
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let result: GenerateVideoResponse | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line) as StreamEvent;
+          if (event.type === "progress") {
+            setLiveProgress((prev) => [...prev, event.stage]);
+          } else if (event.type === "result") {
+            result = event.data;
+          }
+        } catch {
+          // incomplete or malformed line — skip
+        }
+      }
+    }
+
+    if (result) {
+      setLastContext((current) => ({
+        productUnderstanding: result.productUnderstanding ?? current.productUnderstanding,
+        lastCreativePlan: result.creativePlan ?? current.lastCreativePlan,
+        lastReactionAssetId: result.selectedAssets?.reaction.id ?? current.lastReactionAssetId,
+        conversationMemory: appendMemory(
+          current.conversationMemory ?? [],
+          buildMemoryEntry({
+            role: "assistant",
+            text: result.caption || "Generated video result",
+            resultCaption: result.caption
+          })
+        )
+      }));
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          text: result.status === "success" ? "" : result.error ?? "Generation failed.",
+          result
+        }
+      ]);
     }
   }
 
@@ -114,7 +158,7 @@ export function Chat() {
 
   useEffect(() => {
     messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, busy]);
+  }, [messages, busy, liveProgress]);
 
   return (
     <section className="chatPanel" aria-label="Meme ad chat">
@@ -147,6 +191,17 @@ export function Chat() {
         {messages.map((message) => (
           <MessageBubble key={message.id} message={message} />
         ))}
+        {busy && liveProgress.length > 0 ? (
+          <article className="message assistant">
+            <div className="bubble">
+              <ol className="progressList live">
+                {liveProgress.map((stage, i) => (
+                  <li key={i}>{stage}{i === liveProgress.length - 1 ? <span className="progressLiveDot" aria-hidden="true" /> : null}</li>
+                ))}
+              </ol>
+            </div>
+          </article>
+        ) : null}
       </div>
 
       <div className="quickActions">
@@ -159,6 +214,9 @@ export function Chat() {
         </button>
         <button type="button" onClick={() => void submit("less cringe")} disabled={!canRegenerate || busy}>
           Less cringe
+        </button>
+        <button type="button" onClick={() => void submit("try another gif")} disabled={!canRegenerate || busy}>
+          New GIF
         </button>
       </div>
 

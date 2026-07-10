@@ -8,5 +8,13 @@ public/generated/*.mp4
 public/generated/*.json
 public/generated/*.pam
 public/generated/*.jpg
+public/generated/*.jpeg
+public/generated/*.png
+public/generated/*.gif
+public/generated/*.webp
+public/generated/*.mp3
+public/generated/*.wav
+public/generated/*.m4a
+public/generated/*.aac
 !.gitkeep
 .DS_Store

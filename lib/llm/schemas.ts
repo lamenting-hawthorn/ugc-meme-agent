@@ -35,7 +35,7 @@ export const productUnderstandingSchema = z.object({
   emotionalBeforeState: enumValue(["confused", "stressed", "annoyed", "bored", "overwhelmed", "embarrassed"] as const),
   emotionalAfterState: enumValue(["relieved", "confident", "smug", "happy", "calm"] as const),
   memeAngles: z.array(z.string()).min(1).max(6),
-  source: z.enum(["deepseek", "deterministic"]).optional()
+  source: z.enum(["openrouter", "deepseek", "deterministic"]).optional()
 });
 
 export const creativePlanSchema = z.object({
@@ -46,8 +46,9 @@ export const creativePlanSchema = z.object({
   audioMood: enumValue(["funny", "dramatic", "chill", "chaotic", "victory"] as const),
   backgroundCategory: enumValue(["room", "office", "sky", "phone", "gradient", "lifestyle"] as const),
   backgroundMood: enumValue(["clean", "premium", "neutral", "dramatic", "funny"] as const),
-  durationSec: z.number().min(7).max(9),
+  durationSec: z.number().min(7).max(15),
   template: z.literal("top-caption-bottom-reaction"),
   giphyQueries: z.array(z.string()).min(3).max(8),
-  source: z.enum(["deepseek", "deterministic"]).optional()
+  source: z.enum(["openrouter", "deepseek", "deterministic"]).optional(),
+  appliedSkillId: z.literal("reaction-app-ugc-shorts").optional()
 });

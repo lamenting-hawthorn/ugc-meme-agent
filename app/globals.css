@@ -417,3 +417,23 @@ h1 {
 .starterHint { margin: 14px 0 0; color: var(--muted); font-size: 12px; }
 
 @keyframes riseIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+.progressList.live li:last-child {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.progressLiveDot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: pulseDot 1s ease-in-out infinite alternate;
+}
+
+@keyframes pulseDot {
+  from { opacity: 0.4; transform: scale(1); }
+  to { opacity: 1; transform: scale(1.4); }
+}

@@ -2,66 +2,89 @@ import { formatConversationMemory } from "@/lib/chat/memory";
 import type { ConversationMemoryEntry, CreativePlan, ProductUnderstanding, VibeOverride } from "@/lib/types";
 import { callDeepSeekJsonDetailed } from "@/lib/llm/deepseek";
 import { creativePlanSchema } from "@/lib/llm/schemas";
+import type { AppliedVideoSkill } from "@/lib/skills/reactionAppUgc";
 import { logger } from "@/lib/utils/logger";
 
 export async function planCreative(
   product: ProductUnderstanding,
   vibeOverride?: VibeOverride,
-  conversationMemory?: ConversationMemoryEntry[]
+  conversationMemory?: ConversationMemoryEntry[],
+  skill?: AppliedVideoSkill | null
 ): Promise<CreativePlan> {
-  const llmResult = await planWithDeepSeek(product, vibeOverride, conversationMemory);
+  const llmResult = await planWithDeepSeek(product, vibeOverride, conversationMemory, skill);
   if (llmResult) return llmResult;
-  return planDeterministically(product, vibeOverride, conversationMemory);
+  return planDeterministically(product, vibeOverride, conversationMemory, skill);
 }
 
 async function planWithDeepSeek(
   product: ProductUnderstanding,
   vibeOverride?: VibeOverride,
-  conversationMemory?: ConversationMemoryEntry[]
+  conversationMemory?: ConversationMemoryEntry[],
+  skill?: AppliedVideoSkill | null
 ): Promise<CreativePlan | null> {
   try {
-    const result = await callDeepSeekJsonDetailed([
-      {
-        role: "system",
-        content:
-          "You are a creative director for TikTok/Reels meme ads. Return only valid JSON. The final video has one background, one human reaction clip, one caption, and one music track. Write like a real post, not an ad: lowercase, specific, self-aware, and instantly understandable without narration. Use one of these proven formats: 'me when [relatable situation] and [product payoff]', 'pov: [painful old workflow] until [product payoff]', or '[manual behavior] / [using product]'. Make the product the punchline, not the hero. Keep captions 45-110 characters when possible, never more than 2 ideas, and avoid hashtags, emojis, claims, or corporate words like revolutionize, seamless, unlock, future, powerful. Do not name a specific meme or celebrity. Enum fields must use only the allowed values."
-      },
-      {
-        role: "user",
-        content: [
-          vibeOverride ? `Vibe override: ${vibeOverride}` : "",
-          `Product understanding: ${JSON.stringify(product)}`,
-          formatConversationMemory(conversationMemory),
-          `Caption variant index: ${(conversationMemory ?? []).filter((entry) => entry.type === "generation_request" || entry.type === "result_summary").length % 4}`,
-          "Return caption, memeFormat, humorStyle, reactionMood, audioMood, backgroundCategory, backgroundMood, durationSec, template, giphyQueries.",
-          "Example JSON shape:",
-          JSON.stringify({
-            caption: "me when i'm still logging calories manually instead of using calai.app",
-            memeFormat: "pretending-to-know",
-            humorStyle: "relatable",
-            reactionMood: "confused",
-            audioMood: "funny",
-            backgroundCategory: "room",
-            backgroundMood: "clean",
-            durationSec: 8,
-            template: "top-caption-bottom-reaction",
-            giphyQueries: ["confused reaction", "pretending to understand reaction", "panic calculating"]
-          })
-        ]
-          .filter(Boolean)
-          .join("\n")
-      }
-    ]);
+    const result = await callDeepSeekJsonDetailed(
+      [
+        {
+          role: "system",
+          content:
+            [
+              "You are a creative director for TikTok/Reels meme ads. Return only valid JSON.",
+              "The final video has one background, one human reaction clip, one caption, and one music track.",
+              "Write like a real post, not an ad: lowercase, specific, self-aware, and instantly understandable without narration.",
+              "Use one of these proven formats: 'me when [relatable situation] and [product payoff]', 'pov: [painful old workflow] until [product payoff]', or '[manual behavior] / [using product]'.",
+              "Make the product the punchline, not the hero.",
+              "Keep captions 45-110 characters when possible, never more than 2 ideas, and avoid hashtags, emojis, claims, or corporate words like revolutionize, seamless, unlock, future, powerful.",
+              "Do not name a specific meme or celebrity. Enum fields must use only the allowed values.",
+              skill
+                ? `Installed skill to follow as source of truth:\nSkill ID: ${skill.id}\n${skill.instructions}`
+                : ""
+            ].filter(Boolean).join("\n\n")
+        },
+        {
+          role: "user",
+          content: [
+            vibeOverride ? `Vibe override: ${vibeOverride}` : "",
+            `Product understanding: ${JSON.stringify(product)}`,
+            formatConversationMemory(conversationMemory),
+            `Caption variant index: ${(conversationMemory ?? []).filter((entry) => entry.type === "generation_request" || entry.type === "result_summary").length % 4}`,
+            skill ? `Applied skill ID: ${skill.id}` : "",
+            skill ? `Preferred duration: ${skill.targetDurationSec} seconds. Allowed range: ${skill.durationRangeSec.min}-${skill.durationRangeSec.max} seconds.` : "",
+            "Return caption, memeFormat, humorStyle, reactionMood, audioMood, backgroundCategory, backgroundMood, durationSec, template, giphyQueries, appliedSkillId.",
+            "Example JSON shape:",
+            JSON.stringify({
+              caption: "me when i'm still logging calories manually instead of using calai.app",
+              memeFormat: "pretending-to-know",
+              humorStyle: "relatable",
+              reactionMood: "confused",
+              audioMood: "funny",
+              backgroundCategory: "room",
+              backgroundMood: "clean",
+              durationSec: 10,
+              template: "top-caption-bottom-reaction",
+              giphyQueries: ["confused reaction", "pretending to understand reaction", "panic calculating"],
+              appliedSkillId: "reaction-app-ugc-shorts"
+            })
+          ]
+            .filter(Boolean)
+            .join("\n")
+        }
+      ],
+      { timeoutMs: 30_000 }
+    );
     if (!result.ok) {
-      logger.warn("DeepSeek creative planning unavailable; using deterministic fallback", {
+      logger.warn("Structured creative planning unavailable; using deterministic fallback", {
+        provider: result.provider,
+        model: result.model,
         reason: result.reason,
-        detail: result.detail
+        detail: result.detail,
+        elapsedMs: result.elapsedMs
       });
       return null;
     }
-    return { ...creativePlanSchema.parse(JSON.parse(result.content)), source: "deepseek" };
+    return { ...creativePlanSchema.parse(JSON.parse(result.content)), source: result.provider };
   } catch (error) {
-    logger.warn("DeepSeek creative planning returned invalid JSON; using deterministic fallback", {
+    logger.warn("Structured creative planning returned invalid JSON; using deterministic fallback", {
       error: error instanceof Error ? error.message : "unknown"
     });
     return null;
@@ -71,7 +94,8 @@ async function planWithDeepSeek(
 function planDeterministically(
   product: ProductUnderstanding,
   vibeOverride?: VibeOverride,
-  conversationMemory?: ConversationMemoryEntry[]
+  conversationMemory?: ConversationMemoryEntry[],
+  skill?: AppliedVideoSkill | null
 ): CreativePlan {
   const productName = product.productName || new URL(product.productUrl).hostname;
   const dramatic = vibeOverride === "dramatic";
@@ -94,7 +118,7 @@ function planDeterministically(
     audioMood: dramatic ? "dramatic" : lowerEnergy ? "chill" : genz ? "chaotic" : "funny",
     backgroundCategory: product.category.includes("developer") ? "office" : "room",
     backgroundMood: lowerEnergy ? "premium" : "clean",
-    durationSec: 8,
+    durationSec: chooseDuration(vibeOverride, skill),
     template: "top-caption-bottom-reaction",
     giphyQueries: [
       wantsHumanReaction ? `${reactionMood} person reaction` : `${reactionMood} reaction`,
@@ -103,7 +127,8 @@ function planDeterministically(
       "panic calculating",
       "side eye reaction"
     ],
-    source: "deterministic"
+    source: "deterministic",
+    appliedSkillId: skill?.id
   });
 }
 
@@ -152,4 +177,11 @@ function memeWorkflow(product: ProductUnderstanding): string {
   if (category.includes("sales") || category.includes("crm")) return "updating every lead by hand";
   if (category.includes("creative")) return "opening twelve tabs to make one post";
   return product.userPain.replace(/\.$/, "").replace(/^manual /, "").toLowerCase();
+}
+
+function chooseDuration(vibeOverride?: VibeOverride, skill?: AppliedVideoSkill | null): number {
+  if (!skill) return 8;
+  if (vibeOverride === "dramatic") return 12;
+  if (vibeOverride === "less-cringe" || vibeOverride === "premium") return 9;
+  return skill.targetDurationSec;
 }

@@ -71,7 +71,14 @@ async function fetchQueryMode(input: {
   mode: SearchMode;
   mood: CreativePlan["reactionMood"];
 }): Promise<ReactionAsset[]> {
-  const cacheKey = `${input.mode}:${input.query}:${input.mood}`;
+  // Stickers are not tagged with "reaction" — GIPHY returns zero sticker results
+  // for queries like "Andrew Garfield reaction". Strip the trailing "reaction"
+  // (and similar noise words) for sticker mode so we hit the actual sticker pool.
+  const effectiveQuery = input.mode === "stickers"
+    ? input.query.replace(/\s+(reaction|celebrity|funny|shocked|panicked|relief|smug|crying|celebrating)$/i, "").trim() || input.query
+    : input.query;
+
+  const cacheKey = `${input.mode}:${effectiveQuery}:${input.mood}`;
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.assets;
@@ -79,7 +86,7 @@ async function fetchQueryMode(input: {
 
   const params = new URLSearchParams({
     api_key: input.apiKey,
-    q: input.query,
+    q: effectiveQuery,
     limit: String(RESULT_LIMIT),
     rating: "pg-13",
     lang: "en"
@@ -162,6 +169,15 @@ function pickBestRendition(
   const preferAlpha = input.at(-1) === true;
   const renditions = input.filter((value): value is GiphyRendition => typeof value === "object" && value !== null);
   if (preferAlpha) {
+    // Stickers need alpha. The animated .gif rendition preserves transparency
+    // (pix_fmt bgra) and decodes reliably in FFmpeg; the .webp rendition is
+    // also animated+transparent but FFmpeg builds that lack the animated-webp
+    // demuxer fail with "image data not found". Prefer .gif for portability.
+    for (const rendition of renditions) {
+      if (rendition.url && /\.gif($|\?)/i.test(rendition.url)) {
+        return { url: rendition.url, type: "gif", width: rendition.width, height: rendition.height };
+      }
+    }
     for (const rendition of renditions) {
       if (rendition.webp) {
         return { url: rendition.webp, type: "gif", width: rendition.width, height: rendition.height };

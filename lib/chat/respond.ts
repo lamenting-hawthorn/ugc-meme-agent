@@ -32,9 +32,12 @@ export async function replyConversationally(
   ]);
 
   if (!result.ok) {
-    logger.warn("DeepSeek chat reply unavailable; using deterministic fallback", {
+    logger.warn("Structured chat reply unavailable; using deterministic fallback", {
+      provider: result.provider,
+      model: result.model,
       reason: result.reason,
-      detail: result.detail
+      detail: result.detail,
+      elapsedMs: result.elapsedMs
     });
     return fallback;
   }
@@ -43,7 +46,7 @@ export async function replyConversationally(
     const parsed = JSON.parse(result.content) as Partial<ChatReply>;
     return sanitizeReply(parsed.reply) || fallback;
   } catch (error) {
-    logger.warn("DeepSeek chat reply returned invalid JSON; using deterministic fallback", {
+    logger.warn("Structured chat reply returned invalid JSON; using deterministic fallback", {
       error: error instanceof Error ? error.message : "unknown"
     });
     return fallback;

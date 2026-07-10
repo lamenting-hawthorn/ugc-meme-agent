@@ -1,158 +1,96 @@
 import { writeFile } from "fs/promises";
+import sharp from "sharp";
 
-const GLYPHS: Record<string, string[]> = {
-  a: ["01110", "10001", "11111", "10001", "10001", "10001", "10001"],
-  b: ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
-  c: ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
-  d: ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
-  e: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
-  f: ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
-  g: ["01111", "10000", "10000", "10111", "10001", "10001", "01111"],
-  h: ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
-  i: ["11111", "00100", "00100", "00100", "00100", "00100", "11111"],
-  j: ["00111", "00010", "00010", "00010", "10010", "10010", "01100"],
-  k: ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
-  l: ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
-  m: ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
-  n: ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
-  o: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
-  p: ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
-  q: ["01110", "10001", "10001", "10001", "10101", "10010", "01101"],
-  r: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
-  s: ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
-  t: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
-  u: ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
-  v: ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
-  w: ["10001", "10001", "10001", "10101", "10101", "11011", "10001"],
-  x: ["10001", "10001", "01010", "00100", "01010", "10001", "10001"],
-  y: ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
-  z: ["11111", "00001", "00010", "00100", "01000", "10000", "11111"],
-  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
-  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
-  "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
-  "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
-  "4": ["10010", "10010", "10010", "11111", "00010", "00010", "00010"],
-  "5": ["11111", "10000", "10000", "11110", "00001", "00001", "11110"],
-  "6": ["01111", "10000", "10000", "11110", "10001", "10001", "01110"],
-  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
-  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
-  "9": ["01110", "10001", "10001", "01111", "00001", "00001", "11110"],
-  ".": ["00000", "00000", "00000", "00000", "00000", "01100", "01100"],
-  "?": ["01110", "10001", "00001", "00010", "00100", "00000", "00100"],
-  "!": ["00100", "00100", "00100", "00100", "00100", "00000", "00100"],
-  ":": ["00000", "01100", "01100", "00000", "01100", "01100", "00000"],
-  "'": ["00100", "00100", "01000", "00000", "00000", "00000", "00000"],
-  "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
-  "/": ["00001", "00010", "00010", "00100", "01000", "01000", "10000"]
-};
+const CANVAS_WIDTH = 512;
+const CANVAS_HEIGHT = 250;
 
 export async function writeCaptionImage(filePath: string, text: string): Promise<void> {
-  const width = 512;
-  const height = 250;
-  const sidePadding = 28;
-  const maxTextWidth = width - sidePadding * 2;
-  const pixels = Buffer.alloc(width * height * 4);
-  const lines = fitLines(text.toLowerCase(), maxTextWidth).slice(0, 4);
-  const scale = pickScale(lines, maxTextWidth);
-  const glyphWidth = 5 * scale;
-  const glyphHeight = 7 * scale;
-  const lineHeight = glyphHeight + 12;
-  const startY = Math.max(8, Math.floor((height - lines.length * lineHeight) / 2));
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) {
+    await writeFile(filePath, Buffer.from(buildEmptyPng()));
+    return;
+  }
 
-  lines.forEach((line, lineIndex) => {
-    const textWidth = measure(line, scale);
-    let x = Math.max(sidePadding, Math.floor((width - textWidth) / 2));
-    const y = startY + lineIndex * lineHeight;
-    for (const char of line) {
-      if (char === " ") {
-        x += glyphWidth;
-        continue;
-      }
-      drawGlyph(pixels, width, height, x, y, char, scale, [0, 0, 0, 255], 2);
-      drawGlyph(pixels, width, height, x, y, char, scale, [255, 255, 255, 255], 0);
-      x += glyphWidth + scale * 2;
-    }
-  });
+  const lines = wrapText(cleaned);
+  const fontSize = pickFontSize(lines);
+  const svg = buildSvg(lines, fontSize);
 
-  const header = Buffer.from(`P7\nWIDTH ${width}\nHEIGHT ${height}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR\n`);
-  await writeFile(filePath, Buffer.concat([header, pixels]));
+  const png = await sharp(Buffer.from(svg))
+    .png()
+    .toBuffer();
+
+  await writeFile(filePath, png);
 }
 
-function fitLines(text: string, maxWidth: number): string[] {
-  for (const maxChars of [18, 16, 14, 12]) {
+function wrapText(text: string): string[] {
+  const maxCharsOptions = [32, 28, 24, 20];
+  for (const maxChars of maxCharsOptions) {
     const lines = wrap(text, maxChars);
-    if (lines.length <= 4) {
-      return lines;
-    }
+    if (lines.length <= 4) return lines;
   }
-  return wrap(text, 12);
-}
-
-function pickScale(lines: string[], maxWidth: number): number {
-  for (const scale of [5, 4, 3]) {
-    const widestLine = Math.max(...lines.map((line) => measure(line, scale)), 0);
-    if (widestLine <= maxWidth) return scale;
-  }
-  return 3;
+  return wrap(text, 20);
 }
 
 function wrap(text: string, maxChars: number): string[] {
-  const words = text.replace(/[^a-z0-9 .?!:'/-]+/g, "").split(/\s+/).filter(Boolean);
+  const words = text.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let line = "";
   for (const word of words) {
-    if (`${line} ${word}`.trim().length > maxChars && line) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (candidate.length > maxChars && line) {
       lines.push(line);
       line = word;
     } else {
-      line = `${line} ${word}`.trim();
+      line = candidate;
     }
   }
   if (line) lines.push(line);
   return lines;
 }
 
-function measure(line: string, scale: number): number {
-  return [...line].reduce((width, char) => width + (char === " " ? 5 * scale : 7 * scale), 0);
+function pickFontSize(lines: string[]): number {
+  const longest = Math.max(...lines.map((l) => l.length), 0);
+  if (lines.length >= 4 || longest > 28) return 22;
+  if (lines.length === 3 || longest > 20) return 26;
+  return 31;
 }
 
-function drawGlyph(
-  pixels: Buffer,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-  char: string,
-  scale: number,
-  color: [number, number, number, number],
-  stroke: number
-) {
-  const glyph = GLYPHS[char] ?? GLYPHS["?"];
-  for (let row = 0; row < glyph.length; row += 1) {
-    for (let col = 0; col < glyph[row].length; col += 1) {
-      if (glyph[row][col] !== "1") continue;
-      fillRect(pixels, width, height, x + col * scale - stroke, y + row * scale - stroke, scale + stroke * 2, scale + stroke * 2, color);
-    }
-  }
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
-function fillRect(
-  pixels: Buffer,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-  rectWidth: number,
-  rectHeight: number,
-  color: [number, number, number, number]
-) {
-  for (let yy = Math.max(0, y); yy < Math.min(height, y + rectHeight); yy += 1) {
-    for (let xx = Math.max(0, x); xx < Math.min(width, x + rectWidth); xx += 1) {
-      const index = (yy * width + xx) * 4;
-      pixels[index] = color[0];
-      pixels[index + 1] = color[1];
-      pixels[index + 2] = color[2];
-      pixels[index + 3] = color[3];
-    }
-  }
+function buildSvg(lines: string[], fontSize: number): string {
+  const lineHeight = Math.round(fontSize * 1.32);
+  const totalTextHeight = lines.length * lineHeight;
+  const startY = Math.max(46, Math.floor((CANVAS_HEIGHT - totalTextHeight) / 2));
+  const halfWidth = CANVAS_WIDTH / 2;
+
+  const textElements = lines
+    .map((line, i) => {
+      const y = startY + i * lineHeight;
+      return `      <text x="${halfWidth}" y="${y}" font-size="${fontSize}" text-anchor="middle" dominant-baseline="middle" font-family="'Arial','Helvetica Neue',sans-serif" font-weight="900" fill="white" stroke="black" stroke-width="5" paint-order="stroke fill" stroke-linejoin="round">${escapeXml(line)}</text>`;
+    })
+    .join("\n");
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS_WIDTH}" height="${CANVAS_HEIGHT}" viewBox="0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}">${textElements}\n</svg>`;
+}
+
+function buildEmptyPng(): Uint8Array {
+  // Minimal 1x1 transparent PNG
+  return new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+    0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+    0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+    0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+    0x42, 0x60, 0x82
+  ]);
 }
