@@ -1,13 +1,13 @@
 import { createHash } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
+import { providerCacheDir } from "./providerCachePath";
+import { logger } from "@/lib/utils/logger";
 
 type CacheEnvelope<T> = {
   expiresAt: number;
   value: T;
 };
-
-const cacheDir = path.join(process.cwd(), ".cache", "asset-provider");
 
 export async function readProviderCache<T>(namespace: string, key: string): Promise<T | null> {
   try {
@@ -22,16 +22,23 @@ export async function readProviderCache<T>(namespace: string, key: string): Prom
 }
 
 export async function writeProviderCache<T>(namespace: string, key: string, value: T, ttlMs: number): Promise<void> {
-  await mkdir(cacheDir, { recursive: true });
-  const filePath = cacheFile(namespace, key);
-  const payload: CacheEnvelope<T> = {
-    expiresAt: Date.now() + ttlMs,
-    value
-  };
-  await writeFile(filePath, JSON.stringify(payload), "utf8");
+  try {
+    const filePath = cacheFile(namespace, key);
+    const payload: CacheEnvelope<T> = {
+      expiresAt: Date.now() + ttlMs,
+      value
+    };
+    await mkdir(providerCacheDir(), { recursive: true });
+    await writeFile(filePath, JSON.stringify(payload), "utf8");
+  } catch (error) {
+    logger.warn("Provider cache write failed; continuing without cache", {
+      namespace,
+      error: error instanceof Error ? error.message : "unknown"
+    });
+  }
 }
 
 function cacheFile(namespace: string, key: string): string {
   const hash = createHash("sha256").update(`${namespace}:${key}`).digest("hex");
-  return path.join(cacheDir, `${namespace}-${hash}.json`);
+  return path.join(providerCacheDir(), `${namespace}-${hash}.json`);
 }
