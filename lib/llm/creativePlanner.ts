@@ -96,7 +96,7 @@ async function planWithDeepSeek(
             .join("\n")
         }
       ],
-      { timeoutMs: 30_000 }
+      { timeoutMs: 8_000 }
     );
     if (!result.ok) {
       logger.warn("Structured creative planning unavailable; using deterministic fallback", {

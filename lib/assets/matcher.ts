@@ -15,9 +15,9 @@ import { logger } from "@/lib/utils/logger";
 export async function selectAssets(plan: CreativePlan, excludeReactionIds?: string[]): Promise<SelectedAssets> {
   const manifest = loadManifest();
   const [giphyCandidates, pexelsBackgrounds, freesoundAudio] = await Promise.all([
-    withDeadline(fetchGiphyCandidates(plan), 8500, "GIPHY"),
-    withDeadline(fetchPexelsBackgroundCandidates(plan), 8500, "Pexels"),
-    withDeadline(fetchFreesoundCandidates(plan), 8500, "Freesound")
+    withDeadline(fetchGiphyCandidates(plan), 6000, "GIPHY"),
+    withDeadline(fetchPexelsBackgroundCandidates(plan), 6000, "Pexels"),
+    withDeadline(fetchFreesoundCandidates(plan), 6000, "Freesound")
   ]);
   const filteredGiphyCandidates = giphyCandidates.filter((candidate) => passesReactionQualityGate(candidate));
 

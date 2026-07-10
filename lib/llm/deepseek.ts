@@ -69,11 +69,9 @@ async function callDeepSeekProvider(
   const baseUrl = (process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
   const model = process.env.DEEPSEEK_MODEL || "deepseek-v4-pro";
   const controller = new AbortController();
-  // 30 s default — reasoning models (e.g. deepseek-v4-pro when LLM_PROVIDER
-  // does not pin deepseek-chat) often burn 10-20 s in chain-of-thought; the
-  // old 4.5 s default aborted before any payload arrived, cascading to the
-  // deterministic fallback and generic captions.
-  const timeoutMs = options?.timeoutMs ?? 30_000;
+  // Keep the two-stage generation pipeline inside the route's 60 s budget.
+  // Callers can opt into a larger timeout for offline/batch jobs.
+  const timeoutMs = options?.timeoutMs ?? 8_000;
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
@@ -153,7 +151,7 @@ async function callOpenRouterJson(
   const model = process.env.OPENROUTER_TEXT_MODEL
     || process.env.OPENROUTER_VISION_MODEL
     || "qwen/qwen3-vl-30b-a3b-thinking";
-  const timeoutMs = options?.timeoutMs ?? 6000;
+  const timeoutMs = options?.timeoutMs ?? 5_000;
 
   try {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {

@@ -7,8 +7,9 @@ import {
 } from "@/lib/assets/reactionVisualCategory";
 import { logger } from "@/lib/utils/logger";
 
-const MAX_VISION_CANDIDATES = 8;
-const VISION_TIMEOUT_MS = 30_000;
+// Vision is an optional quality pass. It must not consume the render budget.
+const MAX_VISION_CANDIDATES = 6;
+const VISION_TIMEOUT_MS = 7_000;
 
 type VisionRerankResult = {
   ranked: ReactionAsset[] | null;

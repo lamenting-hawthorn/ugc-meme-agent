@@ -11,7 +11,10 @@ import { validateOutput } from "@/lib/render/validateOutput";
 import { persistArtifact, workingDir } from "@/lib/storage/storage";
 
 const execFileAsync = promisify(execFile);
-const FFMPEG_TIMEOUT_MS = 45_000;
+// A ten-second clip should render well under this on the deployment runtime.
+// Keeping a hard ceiling prevents one bad remote input from consuming the
+// entire request budget.
+const FFMPEG_TIMEOUT_MS = 30_000;
 
 type RenderResult = {
   filePath: string;
@@ -105,7 +108,7 @@ export async function renderVideo(jobId: string, renderPlan: RenderPlan): Promis
     "-q:v",
     "3",
     posterPath
-  ], 15_000, "extract poster");
+  ], 8_000, "extract poster");
 
   const video = await persistArtifact(outputPath, `${jobId}.mp4`, "video/mp4");
   const poster = await persistArtifact(posterPath, `${jobId}.jpg`, "image/jpeg");

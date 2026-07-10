@@ -11,6 +11,9 @@ import { hydrateVideoSkill, resolveVideoSkill } from "@/lib/skills/reactionAppUg
 import type { CreativePlan, GenerateVideoRequest, GenerateVideoResponse, SelectedAssets } from "@/lib/types";
 import { loadManifest } from "@/lib/assets/manifest";
 import { scoreAudio, scoreBackground, scoreReaction } from "@/lib/assets/scoring";
+import { GenerationBudget, runWithinBudget } from "@/lib/generate/generationBudget";
+
+const MIN_RENDER_BUDGET_MS = 40_000;
 
 export async function generateVideo(
   request: GenerateVideoRequest,
@@ -19,6 +22,7 @@ export async function generateVideo(
   const jobId = createJobId();
   const progress: string[] = [];
   const startedAt = Date.now();
+  const budget = new GenerationBudget(startedAt);
   const productUrl = extractFirstUrl(request.message) ?? request.previousContext?.productUnderstanding?.productUrl;
   if (!productUrl) {
     return { status: "error", error: "No product URL found. Send a URL plus one line about what it does." };
@@ -46,35 +50,35 @@ export async function generateVideo(
       creativePlan = request.previousContext.lastCreativePlan;
       if (!productUnderstanding) {
         mark("Reading product page...");
-        const page = await fetchProductPage(productUrl);
+        const page = await runWithinBudget(fetchProductPage(productUrl), budget, "product page fetch");
         mark("Understanding the product...");
-        productUnderstanding = await analyzeProduct(request.message, productUrl, page, request.previousContext?.conversationMemory);
+        productUnderstanding = await runWithinBudget(analyzeProduct(request.message, productUrl, page, request.previousContext?.conversationMemory), budget, "product analysis");
       }
       mark("Swapping reaction clip...");
     } else {
       mark("Reading product page...");
-      const page = await fetchProductPage(productUrl);
+      const page = await runWithinBudget(fetchProductPage(productUrl), budget, "product page fetch");
       if (!page.fetchOk) mark("Product page unavailable, continuing from message...");
 
       mark("Understanding the product...");
       productUnderstanding =
         request.previousContext?.productUnderstanding && !extractFirstUrl(request.message)
           ? request.previousContext.productUnderstanding
-          : await analyzeProduct(request.message, productUrl, page, request.previousContext?.conversationMemory);
+        : await runWithinBudget(analyzeProduct(request.message, productUrl, page, request.previousContext?.conversationMemory), budget, "product analysis");
 
       mark("Writing meme caption...");
-      const appliedSkill = await hydrateVideoSkill(resolveVideoSkill(request.message, productUnderstanding) ?? {
+      const appliedSkill = await runWithinBudget(hydrateVideoSkill(resolveVideoSkill(request.message, productUnderstanding) ?? {
         id: "reaction-app-ugc-shorts",
         instructions: "",
         targetDurationSec: 10,
         durationRangeSec: { min: 7, max: 15 }
-      });
-      creativePlan = await planCreative(
+      }), budget, "video skill loading");
+      creativePlan = await runWithinBudget(planCreative(
         productUnderstanding,
         request.vibeOverride,
         request.previousContext?.conversationMemory,
         appliedSkill
-      );
+      ), budget, "creative planning");
     }
 
     const llmProvider = productUnderstanding?.source === "openrouter" || creativePlan.source === "openrouter"
@@ -91,7 +95,7 @@ export async function generateVideo(
       excludeIds.push(request.previousContext.lastReactionAssetId);
     }
 
-    let selectedAssets = await selectAssets(creativePlan, excludeIds);
+    let selectedAssets = await runWithinBudget(selectAssets(creativePlan, excludeIds), budget, "asset selection");
 
     // If the winner is still the excluded reaction (e.g. only one candidate
     // was available) and a runner-up exists, swap them.
@@ -113,15 +117,16 @@ export async function generateVideo(
     let rendered: Awaited<ReturnType<typeof renderVideo>>;
 
     try {
-      rendered = await renderWithReactionFallback(jobId, creativePlan, selectedAssets);
+      rendered = await renderWithReactionFallback(jobId, creativePlan, selectedAssets, budget);
     } catch (renderError) {
       mark("Remote render failed, retrying with simpler local assets...");
       logger.warn("Remote render attempts failed; retrying with known-good local assets", {
         jobId,
         error: renderError instanceof Error ? renderError.message : "unknown"
       });
+      if (budget.remainingMs() < MIN_RENDER_BUDGET_MS) throw renderError;
       selectedAssets = buildLocalFallbackAssets(creativePlan);
-      rendered = await renderVideo(jobId, buildRenderPlan(creativePlan, selectedAssets));
+      rendered = await runWithinBudget(renderVideo(jobId, buildRenderPlan(creativePlan, selectedAssets)), budget, "local fallback render");
     }
 
     mark("Checking output...");
@@ -164,14 +169,20 @@ export async function generateVideo(
 async function renderWithReactionFallback(
   jobId: string,
   creativePlan: CreativePlan,
-  selectedAssets: SelectedAssets
+  selectedAssets: SelectedAssets,
+  budget: GenerationBudget
 ): ReturnType<typeof renderVideo> {
   const manifest = loadManifest();
   let lastError: unknown;
 
-  for (let attempt = 0; attempt < 5; attempt += 1) {
+  // Two recovery attempts cover the known failure modes (remote media
+  // preparation and a bad primary reaction) without multiplying latency.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (budget.remainingMs() < MIN_RENDER_BUDGET_MS) {
+      throw new Error("Generation budget too small for another render attempt");
+    }
     try {
-      return await renderVideo(jobId, buildRenderPlan(creativePlan, selectedAssets));
+      return await runWithinBudget(renderVideo(jobId, buildRenderPlan(creativePlan, selectedAssets)), budget, "render");
     } catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : "unknown";

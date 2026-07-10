@@ -1,4 +1,4 @@
-import { validatePublicHttpUrl } from "@/lib/scraping/validateUrl";
+import { assertPublicHttpUrl, validatePublicHttpUrl } from "@/lib/scraping/validateUrl";
 
 export type ProductPageSnapshot = {
   url: string;
@@ -11,6 +11,7 @@ export type ProductPageSnapshot = {
 };
 
 const MAX_TEXT_CHARS = 6000;
+const MAX_REDIRECTS = 5;
 
 export async function fetchProductPage(url: string): Promise<ProductPageSnapshot> {
   const validatedUrl = validatePublicHttpUrl(url);
@@ -18,16 +19,32 @@ export async function fetchProductPage(url: string): Promise<ProductPageSnapshot
   const timeout = setTimeout(() => controller.abort(), 7000);
 
   try {
-    const response = await fetch(validatedUrl.toString(), {
-      signal: controller.signal,
-      headers: {
-        "user-agent": "ugc-meme-agent/0.1 product-preview-bot"
+    let currentUrl = validatedUrl;
+    let response: Response | undefined;
+    for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+      await assertPublicHttpUrl(currentUrl);
+      response = await fetch(currentUrl.toString(), {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          "user-agent": "ugc-meme-agent/0.1 product-preview-bot"
+        }
+      });
+
+      if (!isRedirect(response.status)) break;
+      const location = response.headers.get("location");
+      if (!location) break;
+      if (redirectCount === MAX_REDIRECTS) {
+        throw new Error("Too many redirects while fetching the product page.");
       }
-    });
+      currentUrl = validatePublicHttpUrl(new URL(location, currentUrl).toString());
+    }
+
+    if (!response) throw new Error("Product page fetch returned no response.");
     const html = await response.text();
     return {
       url: validatedUrl.toString(),
-      finalUrl: response.url,
+      finalUrl: currentUrl.toString(),
       title: readTag(html, "title") || readMeta(html, "og:title"),
       description: readMeta(html, "description") || readMeta(html, "og:description"),
       text: stripHtml(html).slice(0, MAX_TEXT_CHARS),
@@ -46,6 +63,10 @@ export async function fetchProductPage(url: string): Promise<ProductPageSnapshot
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function isRedirect(status: number): boolean {
+  return status >= 300 && status <= 399;
 }
 
 function readTag(html: string, tag: string): string {
