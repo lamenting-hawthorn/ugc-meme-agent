@@ -39,6 +39,8 @@ export type CreativePlan = {
   appliedSkillId?: "reaction-app-ugc-shorts";
 };
 
+export type ReactionVisualCategory = "real_human" | "animated_figure" | "generic";
+
 export type ReactionAsset = {
   id: string;
   source: "local" | "giphy";
@@ -59,6 +61,7 @@ export type ReactionAsset = {
   tags: string[];
   title?: string;
   queryUsed?: string;
+  visualCategory?: ReactionVisualCategory;
   visionScore?: number;
   visionReason?: string;
 };

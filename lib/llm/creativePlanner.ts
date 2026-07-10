@@ -1,6 +1,12 @@
 import { formatConversationMemory } from "@/lib/chat/memory";
 import type { ConversationMemoryEntry, CreativePlan, ProductUnderstanding, VibeOverride } from "@/lib/types";
 import { callDeepSeekJsonDetailed } from "@/lib/llm/deepseek";
+import {
+  buildDistinctFallbackCaption,
+  lacksConcreteProductAnchor,
+  previousGeneratedCaptions,
+  wasCaptionPreviouslyUsed
+} from "@/lib/llm/captionPolicy";
 import { creativePlanSchema } from "@/lib/llm/schemas";
 import type { AppliedVideoSkill } from "@/lib/skills/reactionAppUgc";
 import { logger } from "@/lib/utils/logger";
@@ -13,7 +19,21 @@ export async function planCreative(
 ): Promise<CreativePlan> {
   const llmResult = await planWithDeepSeek(product, vibeOverride, conversationMemory, skill);
   const plan = llmResult ?? planDeterministically(product, vibeOverride, conversationMemory, skill);
-  return ensureProductMention(plan, product);
+  const productAlignedPlan = ensureProductMention(plan, product);
+  const repeatedCaption = wasCaptionPreviouslyUsed(productAlignedPlan.caption, conversationMemory);
+  const genericCaption = lacksConcreteProductAnchor(productAlignedPlan.caption, product);
+  if (!repeatedCaption && !genericCaption) {
+    return productAlignedPlan;
+  }
+
+  const replacementCaption = buildDistinctFallbackCaption(product, vibeOverride, conversationMemory);
+  logger.info("Replaced creative caption that failed deterministic policy", {
+    repeatedCaption,
+    genericCaption,
+    originalCaption: productAlignedPlan.caption,
+    replacementCaption
+  });
+  return ensureProductMention({ ...productAlignedPlan, caption: replacementCaption }, product);
 }
 
 async function planWithDeepSeek(
@@ -34,6 +54,8 @@ async function planWithDeepSeek(
               "Write like a real post, not an ad: lowercase, specific, self-aware, and instantly understandable without narration.",
               "Use one of these proven formats: 'me when [relatable situation] and [product payoff]', 'pov: [painful old workflow] until [product payoff]', or '[manual behavior] / [using product]'.",
               "Make the product the punchline, not the hero.",
+              "Anchor the joke to one concrete capability or old workflow stated in the product understanding. Generic productivity clichés such as 'too many tabs' are forbidden unless the product specifically manages browsers or tabs.",
+              "For broad platforms, choose one specific wedge—such as shipping an app with payments, creating marketing drafts, answering support, or connecting analytics—instead of vaguely saying it does everything.",
               "Keep captions 45-110 characters when possible, never more than 2 ideas, and avoid hashtags, emojis, claims, or corporate words like revolutionize, seamless, unlock, future, powerful.",
               "Do not name a specific meme or celebrity.",
               "The caption must be a complete standalone meme line, must explicitly mention the product/site, and must not end with a dangling word such as and, but, still, because, or until.",
@@ -49,6 +71,7 @@ async function planWithDeepSeek(
             vibeOverride ? `Vibe override: ${vibeOverride}` : "",
             `Product understanding: ${JSON.stringify(product)}`,
             `Caption identity requirement: explicitly include the exact site host ${productHost(product)} or the product name ${product.productName}.`,
+            `Previous generated captions that must not be repeated: ${previousGeneratedCaptions(conversationMemory).join(" | ") || "none"}.`,
             formatConversationMemory(conversationMemory),
             `Caption variant index: ${(conversationMemory ?? []).filter((entry) => entry.type === "generation_request" || entry.type === "result_summary").length % 4}`,
             skill ? `Applied skill ID: ${skill.id}` : "",
@@ -161,17 +184,17 @@ function planDeterministically(
   conversationMemory?: ConversationMemoryEntry[],
   skill?: AppliedVideoSkill | null
 ): CreativePlan {
-  const productName = product.productName || new URL(product.productUrl).hostname;
   const dramatic = vibeOverride === "dramatic";
   const funny = vibeOverride === "funny";
   const lowerEnergy = vibeOverride === "less-cringe" || vibeOverride === "premium";
   const genz = vibeOverride === "genz" || vibeOverride === "chaotic";
   const memoryText = (conversationMemory ?? []).map((entry) => entry.summary.toLowerCase()).join(" ");
-  const wantsHumanReaction = /real human|real person|celebrity|meme reaction|not abstract|not scribble|use a person/.test(memoryText);
   const wantsSafeCaption = /text cut|caption cut|cropped text|safe margin|wrap text/.test(memoryText);
   const generationCount = (conversationMemory ?? []).filter((entry) => entry.type === "generation_request" || entry.type === "result_summary").length;
 
-  const caption = buildCaption(productName, product, vibeOverride, wantsSafeCaption, generationCount);
+  const caption = wantsSafeCaption
+    ? `${product.oldWorkflow.replace(/\.$/, "").toLowerCase()} / ${productHost(product)} doing it in one place`
+    : buildDistinctFallbackCaption(product, vibeOverride, conversationMemory);
   const reactionMood = dramatic ? "shocked" : funny ? "celebrating" : lowerEnergy ? "relief" : genz ? "panic" : "confused";
 
   return creativePlanSchema.parse({
@@ -185,8 +208,8 @@ function planDeterministically(
     durationSec: chooseDuration(vibeOverride, skill),
     template: "top-caption-bottom-reaction",
     giphyQueries: [
-      wantsHumanReaction ? `${reactionMood} person reaction` : `${reactionMood} reaction`,
-      wantsHumanReaction ? `${reactionMood} celebrity meme` : `${reactionMood} sticker`,
+      `${reactionMood} real human sticker`,
+      `${reactionMood} celebrity reaction`,
       "pretending to understand reaction",
       "panic calculating",
       "side eye reaction"
@@ -194,53 +217,6 @@ function planDeterministically(
     source: "deterministic",
     appliedSkillId: skill?.id
   });
-}
-
-function buildCaption(
-  productName: string,
-  product: ProductUnderstanding,
-  vibeOverride?: VibeOverride,
-  wantsSafeCaption?: boolean,
-  generationCount = 0
-): string {
-  const oldWorkflow = product.oldWorkflow.replace(/\.$/, "").toLowerCase();
-  const benefit = product.productBenefit.replace(/\.$/, "").toLowerCase();
-  const shortName = new URL(product.productUrl).hostname.replace(/^www\./, "").toLowerCase();
-  const manualWorkflow = memeWorkflow(product);
-
-  if (vibeOverride === "dramatic") {
-    return `pov: ${oldWorkflow} until ${shortName} enters the chat`;
-  }
-  if (vibeOverride === "funny") {
-    return `me when ${shortName} does the boring part and i take the credit`;
-  }
-  if (vibeOverride === "less-cringe" || vibeOverride === "premium") {
-    return `me after realizing ${shortName} can ${benefit}`;
-  }
-  if (vibeOverride === "chaotic" || vibeOverride === "genz") {
-    return `me fighting ${oldWorkflow} like it owes me money / ${shortName} watching`;
-  }
-  if (wantsSafeCaption) {
-    return `${oldWorkflow} / ${shortName} doing it in one tap`;
-  }
-  const variants = [
-    `me when i'm still ${manualWorkflow} instead of using ${shortName}`,
-    `me acting like i know what i'm doing so i just open ${shortName} and let it handle it`,
-    `pov: ${oldWorkflow} until ${shortName} enters the chat`,
-    `${manualWorkflow} manually / ${shortName} doing the boring part`
-  ];
-  return variants[generationCount % variants.length];
-}
-
-function memeWorkflow(product: ProductUnderstanding): string {
-  const category = product.category.toLowerCase();
-  if (category.includes("fitness") || category.includes("nutrition")) return "logging calories manually";
-  if (category.includes("calendar") || category.includes("scheduling")) return "sending five messages to find one time";
-  if (category.includes("finance") || category.includes("operations")) return "copying numbers between spreadsheets";
-  if (category.includes("developer")) return "rewriting the same boilerplate again";
-  if (category.includes("sales") || category.includes("crm")) return "updating every lead by hand";
-  if (category.includes("creative")) return "opening twelve tabs to make one post";
-  return product.userPain.replace(/\.$/, "").replace(/^manual /, "").toLowerCase();
 }
 
 function chooseDuration(vibeOverride?: VibeOverride, skill?: AppliedVideoSkill | null): number {

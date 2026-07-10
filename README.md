@@ -36,7 +36,7 @@ PEXELS_API_KEY=      # optional; local backgrounds remain the fallback
 FREESOUND_API_KEY=   # optional; local audio remains the fallback
 OPENROUTER_API_KEY=  # optional; preferred provider for structured text + vision
 OPENROUTER_TEXT_MODEL=qwen/qwen3-vl-30b-a3b-thinking
-OPENROUTER_VISION_MODEL=qwen/qwen3-vl-30b-a3b-thinking
+OPENROUTER_VISION_MODEL=qwen/qwen3-vl-30b-a3b-instruct
 OPENROUTER_APP_TITLE=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 STORAGE_MODE=local
@@ -50,7 +50,7 @@ Add all API keys in `.env.local` at the repo root. This app reads them server-si
 - `lib/scraping` extracts and validates product URLs, then fetches public metadata with a timeout.
 - `lib/llm` creates schema-validated product understanding and creative plans.
 - `lib/skills` resolves installed reusable skills and injects their instructions into generation at runtime.
-- `lib/assets` loads the local manifest, searches GIPHY `gifs` and `stickers`, optionally reranks top remote reaction candidates with an OpenRouter-hosted vision model, pulls remote Pexels backgrounds and Freesound previews when configured, caches provider responses on disk, and scores assets.
+- `lib/assets` loads the local manifest, searches GIPHY `gifs` and `stickers`, and optionally uses an OpenRouter-hosted Qwen VL model to classify the top remote reactions. Selection follows a strict visual hierarchy: real-human stickers first, animated figures second, and generic/random stickers only as fallback. It also pulls remote Pexels backgrounds and Freesound previews when configured, caches provider responses on disk, and scores assets.
 - `lib/render` builds a deterministic render plan, creates a caption overlay (SVG → PNG via sharp), renders with FFmpeg, and validates the MP4 with `ffprobe`.
 - `public/generated` stores local demo output.
 

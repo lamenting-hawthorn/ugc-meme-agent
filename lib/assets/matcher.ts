@@ -1,8 +1,13 @@
-import type { CreativePlan, ReactionAsset, SelectedAssets } from "@/lib/types";
+import type { CreativePlan, ReactionAsset, ReactionVisualCategory, SelectedAssets } from "@/lib/types";
 import { fetchGiphyCandidates } from "@/lib/assets/giphy";
 import { fetchPexelsBackgroundCandidates } from "@/lib/assets/pexels";
 import { fetchFreesoundCandidates } from "@/lib/assets/freesound";
 import { loadManifest } from "@/lib/assets/manifest";
+import {
+  formatReactionVisualCategory,
+  inferReactionVisualCategoryFromTitle,
+  REACTION_VISUAL_CATEGORY_PRIORITY
+} from "@/lib/assets/reactionVisualCategory";
 import { rerankReactionCandidatesWithVision } from "@/lib/llm/openrouterVision";
 import { scoreAudio, scoreBackground, scoreReaction } from "@/lib/assets/scoring";
 import { logger } from "@/lib/utils/logger";
@@ -16,8 +21,7 @@ export async function selectAssets(plan: CreativePlan, excludeReactionIds?: stri
   ]);
   const filteredGiphyCandidates = giphyCandidates.filter((candidate) => passesReactionQualityGate(candidate));
 
-  const humanCandidates = filteredGiphyCandidates.filter((candidate) => hasHumanSignal(candidate));
-  let reactionPool: ReactionAsset[] = humanCandidates.length > 0 ? humanCandidates : filteredGiphyCandidates;
+  let reactionPool: ReactionAsset[] = filteredGiphyCandidates;
   let usedLocalFallback = false;
 
   if (reactionPool.length > 0) {
@@ -43,11 +47,10 @@ export async function selectAssets(plan: CreativePlan, excludeReactionIds?: stri
   // If exclusion emptied the pool, reset to the full local set.
   if (reactionPool.length === 0) {
     reactionPool = manifest.reactions;
+    usedLocalFallback = true;
   }
 
-  const heuristicReactions = [...reactionPool].sort(
-    (a, b) => scoreReaction(plan, b) - scoreReaction(plan, a)
-  );
+  const heuristicReactions = rankReactionsWithoutVision(plan, reactionPool);
 
   // Vision reranking only helps for remote candidates. Skip it for local clips.
   const visionRerank = usedLocalFallback ? null : await rerankReactionCandidatesWithVision(plan, heuristicReactions);
@@ -75,7 +78,7 @@ export async function selectAssets(plan: CreativePlan, excludeReactionIds?: stri
     audio,
     runnerUpReaction,
     reasons: [
-      `${reaction.id} matched ${plan.reactionMood} with score ${reactionScore}${reaction.hasTransparentBackground ? " and transparent/sticker preferred" : ""}${reaction.visionScore !== undefined ? `; vision rerank ${reaction.visionScore.toFixed(2)}` : ""}${usedLocalFallback ? " (local fallback — GIPHY did not return usable candidates)" : ""}`,
+      `${reaction.id} matched ${plan.reactionMood} with score ${reactionScore}${reaction.hasTransparentBackground ? " and transparent/sticker preferred" : ""}${reaction.visualCategory ? `; visual tier ${formatReactionVisualCategory(reaction.visualCategory)}` : ""}${reaction.visionScore !== undefined ? `; vision rerank ${reaction.visionScore.toFixed(2)}` : ""}${usedLocalFallback ? " (local fallback — GIPHY did not return usable candidates)" : ""}`,
       runnerUpReaction ? `Runner-up ${runnerUpReaction.id} scored ${runnerUpScore} for quick regeneration` : "No reaction runner-up available",
       `${audio.id} matched ${plan.audioMood} with score ${scoreAudio(plan, audio).toFixed(2)}`,
       `${background.id} kept the top caption zone clean; static background enforced`,
@@ -108,7 +111,22 @@ function passesReactionQualityGate(asset: ReactionAsset): boolean {
   return true;
 }
 
-function hasHumanSignal(asset: ReactionAsset): boolean {
-  const descriptor = `${asset.title ?? ""} ${asset.tags.join(" ")} ${asset.queryUsed ?? ""}`.toLowerCase();
-  return /human|person|people|celebrity|actor|actress|man|woman|guy|girl|boy|face|travolta|rock|garfield|holland/.test(descriptor);
+function inferVisualCategoryFromMetadata(asset: ReactionAsset): ReactionVisualCategory {
+  // Search queries and normalized tags describe what we asked GIPHY for, not
+  // what the returned sticker visibly contains. Use the provider title only so
+  // a generic result from a "celebrity" query is not mislabeled as a human.
+  return inferReactionVisualCategoryFromTitle(asset.title) ?? "generic";
+}
+
+function rankReactionsWithoutVision(plan: CreativePlan, candidates: ReactionAsset[]): ReactionAsset[] {
+  return candidates
+    .map((candidate) => ({
+      ...candidate,
+      visualCategory: inferVisualCategoryFromMetadata(candidate)
+    }))
+    .sort((a, b) => {
+      const categoryDifference = REACTION_VISUAL_CATEGORY_PRIORITY[b.visualCategory!]
+        - REACTION_VISUAL_CATEGORY_PRIORITY[a.visualCategory!];
+      return categoryDifference !== 0 ? categoryDifference : scoreReaction(plan, b) - scoreReaction(plan, a);
+    });
 }
