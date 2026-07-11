@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import sharp from "sharp";
-import { writeCaptionImage } from "../lib/render/captionImage.ts";
+import { layoutCaption, writeCaptionImage } from "../lib/render/captionImage.ts";
 
 test("caption rasterization is font-independent and produces visible glyph pixels", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "caption-image-test-"));
@@ -33,4 +33,33 @@ test("caption rasterization is font-independent and produces visible glyph pixel
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("caption layout preserves the complete maximum-length caption inside the safe region", () => {
+  const caption = "me when i spend 2 hours debugging a production issue and calai.app scans the whole meal before i have even finished explaining what went wrong";
+  const layout = layoutCaption(caption);
+
+  assert.equal(layout.lines.join(" "), caption);
+  assert.ok(layout.scale >= 2, "caption must remain readable");
+  assert.ok(layout.lines.length > 4, "regression requires more than the old four-line limit");
+  assert.ok(layout.width <= 456, "caption must remain inside horizontal safe margins");
+  assert.ok(layout.height <= 234, "caption must remain inside vertical safe margins");
+});
+
+test("caption layout splits an oversized word without clipping it", () => {
+  const caption = "pov supercalifragilisticexpialidociousworkflow calai.app fixed it";
+  const layout = layoutCaption(caption);
+
+  assert.equal(layout.lines.join("").replaceAll(" ", ""), caption.replaceAll(" ", ""));
+  assert.ok(layout.width <= 456);
+  assert.ok(layout.height <= 234);
+});
+
+test("caption layout fits the schema maximum even with the widest glyphs", () => {
+  const caption = "w".repeat(145);
+  const layout = layoutCaption(caption);
+
+  assert.equal(layout.lines.join(""), caption);
+  assert.ok(layout.width <= 456);
+  assert.ok(layout.height <= 234);
 });
