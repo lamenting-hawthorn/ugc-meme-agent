@@ -4,6 +4,10 @@ import sharp from "sharp";
 // Keep caption rendering independent of the deployment host's installed fonts.
 const WIDTH = 512;
 const HEIGHT = 250;
+const HORIZONTAL_MARGIN = 28;
+const VERTICAL_MARGIN = 8;
+const MIN_SCALE = 2;
+const MAX_SCALE = 5;
 const GLYPH_WIDTH = 5;
 const GLYPH_HEIGHT = 7;
 
@@ -55,15 +59,14 @@ const GLYPHS: Record<string, string[]> = {
 
 export async function writeCaptionImage(filePath: string, text: string): Promise<void> {
   const pixels = Buffer.alloc(WIDTH * HEIGHT * 4);
-  const lines = fitLines(text.toLowerCase()).slice(0, 4);
-  const scale = pickScale(lines);
+  const layout = layoutCaption(text);
+  const { lines, scale, lineHeight } = layout;
   const glyphWidth = GLYPH_WIDTH * scale;
-  const lineHeight = GLYPH_HEIGHT * scale + 12;
-  const startY = Math.max(8, Math.floor((HEIGHT - lines.length * lineHeight) / 2));
+  const startY = Math.max(VERTICAL_MARGIN, Math.floor((HEIGHT - layout.height) / 2));
 
   lines.forEach((line, lineIndex) => {
     const textWidth = measure(line, scale);
-    let x = Math.max(28, Math.floor((WIDTH - textWidth) / 2));
+    let x = Math.max(HORIZONTAL_MARGIN, Math.floor((WIDTH - textWidth) / 2));
     const y = startY + lineIndex * lineHeight;
 
     for (const char of line) {
@@ -83,37 +86,64 @@ export async function writeCaptionImage(filePath: string, text: string): Promise
   await writeFile(filePath, png);
 }
 
-function fitLines(text: string): string[] {
-  for (const maxChars of [18, 16, 14, 12]) {
-    const lines = wrap(text, maxChars);
-    if (lines.length <= 4) return lines;
+export function layoutCaption(text: string): {
+  lines: string[];
+  scale: number;
+  lineHeight: number;
+  width: number;
+  height: number;
+} {
+  const cleaned = text.toLowerCase().replace(/[^a-z0-9 .?!:'/-]+/g, "").replace(/\s+/g, " ").trim();
+  const maxWidth = WIDTH - HORIZONTAL_MARGIN * 2;
+  const maxHeight = HEIGHT - VERTICAL_MARGIN * 2;
+
+  for (let scale = MAX_SCALE; scale >= MIN_SCALE; scale -= 1) {
+    const lines = wrapByWidth(cleaned, scale, maxWidth);
+    const lineHeight = GLYPH_HEIGHT * scale + Math.max(6, scale * 2 + 2);
+    const width = Math.max(...lines.map((line) => measure(line, scale)), 0);
+    const height = lines.length === 0
+      ? 0
+      : GLYPH_HEIGHT * scale + (lines.length - 1) * lineHeight;
+    if (width <= maxWidth && height <= maxHeight) {
+      return { lines, scale, lineHeight, width, height };
+    }
   }
-  return wrap(text, 12);
+
+  throw new Error("Caption cannot fit inside the configured safe region");
 }
 
-function wrap(text: string, maxChars: number): string[] {
-  const words = text.replace(/[^a-z0-9 .?!:'/-]+/g, "").split(/\s+/).filter(Boolean);
+function wrapByWidth(text: string, scale: number, maxWidth: number): string[] {
+  const words = text.split(" ").filter(Boolean).flatMap((word) => splitWord(word, scale, maxWidth));
   const lines: string[] = [];
   let line = "";
   for (const word of words) {
-    if (`${line} ${word}`.trim().length > maxChars && line) {
+    const candidate = `${line} ${word}`.trim();
+    if (line && measure(candidate, scale) > maxWidth) {
       lines.push(line);
       line = word;
     } else {
-      line = `${line} ${word}`.trim();
+      line = candidate;
     }
   }
   if (line) lines.push(line);
   return lines;
 }
 
-function pickScale(lines: string[]): number {
-  const maxTextWidth = WIDTH - 56;
-  for (const scale of [5, 4, 3]) {
-    const widestLine = Math.max(...lines.map((line) => measure(line, scale)), 0);
-    if (widestLine <= maxTextWidth) return scale;
+function splitWord(word: string, scale: number, maxWidth: number): string[] {
+  if (measure(word, scale) <= maxWidth) return [word];
+  const chunks: string[] = [];
+  let chunk = "";
+  for (const character of word) {
+    const candidate = `${chunk}${character}`;
+    if (chunk && measure(candidate, scale) > maxWidth) {
+      chunks.push(chunk);
+      chunk = character;
+    } else {
+      chunk = candidate;
+    }
   }
-  return 3;
+  if (chunk) chunks.push(chunk);
+  return chunks;
 }
 
 function measure(line: string, scale: number): number {
